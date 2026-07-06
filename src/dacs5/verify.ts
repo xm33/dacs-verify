@@ -75,10 +75,12 @@ export interface ReputationDerivation {
   bundleCount: number;
   metrics: {
     completionRate: number | null;
+    counterpartyAdjustedCompletionRate: number | null;
     counterpartyDisputeRate: number | null;
     averageBuyerRating: number | null;
     averageSellerRating: number | null;
     observedTransactionalVolume: PriceTerm[];
+    transactionCountByCurrency: Array<{ currency: string; count: number }>;
   };
   computedAt: number;
   windowingBasis: "finalisedAt" | "sr2-anchor-timestamp";
@@ -403,9 +405,10 @@ export function deriveReputation(
   const abortedByOther = orderedOutcomes.filter((o) => o === "aborted-by-other").length;
   const partyFaultDenom = orderedOutcomes.length - failedSubstrate;
   const counterpartyFaultCount = abortedByOther + failedCounterparty;
+  const partyBlameDenom = partyFaultDenom - counterpartyFaultCount;
 
   const { averageBuyerRating, averageSellerRating } = aggregateRatings(orderedBundles, party, resolvers.resolveRating);
-  const observedTransactionalVolume = aggregateVolume(orderedBundles, resolvers.resolveAgreement);
+  const { observedTransactionalVolume, transactionCountByCurrency } = aggregateVolume(ordered, resolvers.resolveAgreement);
   const bundleRefs = ordered
     .map(({ bundle, contentHash }) => ({
       kind: "dacs-5-bundle",
@@ -421,10 +424,12 @@ export function deriveReputation(
     bundleCount: reconciled.length,
     metrics: {
       completionRate: partyFaultDenom > 0 ? completed / partyFaultDenom : null,
+      counterpartyAdjustedCompletionRate: partyBlameDenom > 0 ? completed / partyBlameDenom : null,
       counterpartyDisputeRate: partyFaultDenom > 0 ? counterpartyFaultCount / partyFaultDenom : null,
       averageBuyerRating,
       averageSellerRating,
       observedTransactionalVolume,
+      transactionCountByCurrency,
     },
     computedAt,
     windowingBasis: "finalisedAt",
@@ -471,14 +476,24 @@ function aggregateRatings(
   };
 }
 
-// §10.5.1 (L3327): sum agreement.terms.price by currency over reconciled bundles whose agreementRef resolves. The
+// §10.5.1: sum agreement.terms.price by currency over completed reconciled bundles whose agreementRef resolves. The
 // DACS-3 fetch+hash-verify+parse lives in the injected resolver (caller-supplied / L4 DACS-3 verifier); a null result
-// excludes that bundle. Without a resolver, volume is empty (no signal). Amounts are CD-1 canonical decimals.
-function aggregateVolume(reconciled: AttestationBundle[], resolveAgreement: AgreementPriceResolver | undefined): { amount: string; currency: string }[] {
-  if (resolveAgreement === undefined) return [];
+// excludes that bundle. Without a resolver, volume/count are empty (no signal). Amounts are CD-1 canonical decimals.
+function aggregateVolume(
+  reconciled: Array<{ bundle: AttestationBundle; outcome: BundleOutcome }>,
+  resolveAgreement: AgreementPriceResolver | undefined,
+): {
+  observedTransactionalVolume: { amount: string; currency: string }[];
+  transactionCountByCurrency: Array<{ currency: string; count: number }>;
+} {
+  if (resolveAgreement === undefined) {
+    return { observedTransactionalVolume: [], transactionCountByCurrency: [] };
+  }
   const byCurrency = new Map<string, bigint>();   // currency → summed value scaled to SCALE fractional digits
+  const countByCurrency = new Map<string, number>();
   const order: string[] = [];
-  for (const b of reconciled) {
+  for (const { bundle: b, outcome } of reconciled) {
+    if (outcome !== "completed") continue;
     if (b.agreementRef === undefined) continue;
     const price = resolveAgreement(b.agreementRef);
     if (price === null) continue;
@@ -486,8 +501,12 @@ function aggregateVolume(reconciled: AttestationBundle[], resolveAgreement: Agre
     if (scaled === null) continue;                  // unparseable amount → exclude
     if (!byCurrency.has(price.currency)) order.push(price.currency);
     byCurrency.set(price.currency, (byCurrency.get(price.currency) ?? 0n) + scaled);
+    countByCurrency.set(price.currency, (countByCurrency.get(price.currency) ?? 0) + 1);
   }
-  return order.map((currency) => ({ amount: unscaleDecimal(byCurrency.get(currency)!), currency }));
+  return {
+    observedTransactionalVolume: order.map((currency) => ({ amount: unscaleDecimal(byCurrency.get(currency)!), currency })),
+    transactionCountByCurrency: order.map((currency) => ({ currency, count: countByCurrency.get(currency)! })),
+  };
 }
 
 // Fixed-scale decimal arithmetic for volume summation. SCALE digits of fraction is ample for on-chain asset amounts

@@ -160,10 +160,12 @@ test("deriveReputation excludes failed-substrate from party fault denominator", 
   );
   expect(derivation.bundleCount).toBe(5);
   expect(derivation.metrics.completionRate).toBe(0.25);
+  expect(derivation.metrics.counterpartyAdjustedCompletionRate).toBe(0.5);
   expect(derivation.metrics.counterpartyDisputeRate).toBe(0.5);
   expect(derivation.metrics.averageBuyerRating).toBeNull();
   expect(derivation.metrics.averageSellerRating).toBeNull();
   expect(derivation.metrics.observedTransactionalVolume).toEqual([]);
+  expect(derivation.metrics.transactionCountByCurrency).toEqual([]);
   expect(derivation.bundleRefs).toHaveLength(5);
   expect(derivation.windowingBasis).toBe("finalisedAt");
   expect(derivation.bundleRefs.map((ref) => ref.contentHash)).toEqual(
@@ -181,8 +183,11 @@ test("deriveReputation returns null metrics, not zero, when denominator is zero"
   );
   expect(derivation.bundleCount).toBe(1);
   expect(derivation.metrics.completionRate).toBeNull();
+  expect(derivation.metrics.counterpartyAdjustedCompletionRate).toBeNull();
   expect(derivation.metrics.counterpartyDisputeRate).toBeNull();
+  expect(derivation.metrics.transactionCountByCurrency).toEqual([]);
   expect(derivation.metrics.completionRate).not.toBe(0);
+  expect(derivation.metrics.counterpartyAdjustedCompletionRate).not.toBe(0);
   expect(derivation.metrics.counterpartyDisputeRate).not.toBe(0);
 });
 
@@ -236,6 +241,7 @@ test("deriveReputation two-sided reconciliation: victim scored over both copies 
   const victim = deriveReputation(VERIFY_BUYER_CLAIM, () => "buyer", pair, VERIFY_REPUTATION_WINDOW_START, VERIFY_REPUTATION_WINDOW_END, VERIFY_REPUTATION_COMPUTED_AT);
   expect(victim.bundleCount).toBe(1);
   expect(victim.metrics.completionRate).toBe(0);
+  expect(victim.metrics.counterpartyAdjustedCompletionRate).toBeNull();
   expect(victim.metrics.counterpartyDisputeRate).toBe(1); // the single aborted-by-other, counted once
 });
 
@@ -336,10 +342,11 @@ test("deriveReputation rating aggregation de-duplicates by (rater, jobId, target
   expect(noResolver.metrics.averageBuyerRating).toBeNull();
 });
 
-test("deriveReputation observedTransactionalVolume sums agreement price by currency via resolver", () => {
-  // §10.5.1: 5 in-window reconciled bundles, each agreementRef resolves to 5 usdc → 25 usdc grouped by currency.
+test("deriveReputation observedTransactionalVolume and transactionCountByCurrency use completed sessions", () => {
+  // §10.5.1: only the completed in-window reconciled bundle contributes transaction volume/count.
   const derivation = deriveReputation(VERIFY_BUYER_CLAIM, () => "buyer", reps, VERIFY_REPUTATION_WINDOW_START, VERIFY_REPUTATION_WINDOW_END, VERIFY_REPUTATION_COMPUTED_AT, { resolveAgreement: fixtures.resolveAgreement });
-  expect(derivation.metrics.observedTransactionalVolume).toEqual([{ amount: "25", currency: "usdc" }]);
+  expect(derivation.metrics.observedTransactionalVolume).toEqual([{ amount: "5", currency: "usdc" }]);
+  expect(derivation.metrics.transactionCountByCurrency).toEqual([{ currency: "usdc", count: 1 }]);
 });
 
 test("deriveReputation ignores self-declared party roles — a relabelled bundle cannot flip its own abort (trust boundary)", () => {

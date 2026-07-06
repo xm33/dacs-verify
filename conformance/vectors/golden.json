@@ -312,10 +312,12 @@
       "bundleCount": 5,
       "metrics": {
         "completionRate": 0.25,
+        "counterpartyAdjustedCompletionRate": 0.5,
         "counterpartyDisputeRate": 0.5,
         "averageBuyerRating": null,
         "averageSellerRating": null,
-        "observedTransactionalVolume": []
+        "observedTransactionalVolume": [],
+        "transactionCountByCurrency": []
       },
       "bundleRefs": [
         {
@@ -354,8 +356,14 @@
       "ratingDedupAverageBuyer": 5,
       "volumeGrouped": [
         {
-          "amount": "25",
+          "amount": "5",
           "currency": "usdc"
+        }
+      ],
+      "transactionCountGrouped": [
+        {
+          "currency": "usdc",
+          "count": 1
         }
       ],
       "misanchoredRoleSignatureRejected": "absent",

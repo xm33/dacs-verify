@@ -1891,19 +1891,24 @@ rec("cd1-positivity", "decimal", "§9.3", "amount MUST be > 0",
     {
       bundleCount: reputation.bundleCount,
       completionRate: reputation.metrics.completionRate,
+      counterpartyAdjustedCompletionRate: reputation.metrics.counterpartyAdjustedCompletionRate,
       counterpartyDisputeRate: reputation.metrics.counterpartyDisputeRate,
+      transactionCountByCurrency: reputation.metrics.transactionCountByCurrency,
       bundleRefs: reputation.bundleRefs.length,
     },
-    { bundleCount: 5, completionRate: 0.25, counterpartyDisputeRate: 0.5, bundleRefs: 5 });
+    { bundleCount: 5, completionRate: 0.25, counterpartyAdjustedCompletionRate: 0.5, counterpartyDisputeRate: 0.5, transactionCountByCurrency: [], bundleRefs: 5 });
   rec("verify-reputation-null-not-zero", "verify", "§10.5.1", "denominator zero returns null metrics, never zero",
     {
       bundleCount: substrateOnly.bundleCount,
       completionRate: substrateOnly.metrics.completionRate,
+      counterpartyAdjustedCompletionRate: substrateOnly.metrics.counterpartyAdjustedCompletionRate,
       counterpartyDisputeRate: substrateOnly.metrics.counterpartyDisputeRate,
       completionIsZero: substrateOnly.metrics.completionRate === 0,
+      counterpartyAdjustedIsZero: substrateOnly.metrics.counterpartyAdjustedCompletionRate === 0,
       disputeIsZero: substrateOnly.metrics.counterpartyDisputeRate === 0,
+      transactionCountByCurrency: substrateOnly.metrics.transactionCountByCurrency,
     },
-    { bundleCount: 1, completionRate: null, counterpartyDisputeRate: null, completionIsZero: false, disputeIsZero: false });
+    { bundleCount: 1, completionRate: null, counterpartyAdjustedCompletionRate: null, counterpartyDisputeRate: null, completionIsZero: false, counterpartyAdjustedIsZero: false, disputeIsZero: false, transactionCountByCurrency: [] });
   rec("verify-reputation-window", "verify", "§10.5.1", "window filtering excludes out-of-window bundles from scoped count",
     deriveReputation(VERIFY_BUYER_CLAIM, () => "buyer", reps, VERIFY_REPUTATION_WINDOW_END + 1, VERIFY_REPUTATION_WINDOW_END + 2_000, VERIFY_REPUTATION_COMPUTED_AT).bundleCount,
     1);
@@ -1925,13 +1930,14 @@ rec("cd1-positivity", "decimal", "§9.3", "amount MUST be > 0",
       averageBuyerRating: reputation.metrics.averageBuyerRating,
       averageSellerRating: reputation.metrics.averageSellerRating,
       observedTransactionalVolume: reputation.metrics.observedTransactionalVolume,
+      transactionCountByCurrency: reputation.metrics.transactionCountByCurrency,
     },
-    { averageBuyerRating: null, averageSellerRating: null, observedTransactionalVolume: [] });
+    { averageBuyerRating: null, averageSellerRating: null, observedTransactionalVolume: [], transactionCountByCurrency: [] });
   rec("verify-lookup-cross-session-jobid-ignored", "verify", "§10.4.3(a)", "a fetched bundle whose embedded jobId ≠ the looked-up jobId is ignored → absent (cross-session replay/misreturn)",
     crossSessionVerdict, "absent");
   rec("verify-reputation-no-double-count", "verify", "§10.5.1", "two-sided reconciliation: victim scored over BOTH copies of one abort → self_copy wins → exactly one aborted-by-other, counted once (no double-count)",
-    { bundleCount: noDoubleCount.bundleCount, bundleRefs: noDoubleCount.bundleRefs.length, completionRate: noDoubleCount.metrics.completionRate, counterpartyDisputeRate: noDoubleCount.metrics.counterpartyDisputeRate },
-    { bundleCount: 1, bundleRefs: 1, completionRate: 0, counterpartyDisputeRate: 1 });
+    { bundleCount: noDoubleCount.bundleCount, bundleRefs: noDoubleCount.bundleRefs.length, completionRate: noDoubleCount.metrics.completionRate, counterpartyAdjustedCompletionRate: noDoubleCount.metrics.counterpartyAdjustedCompletionRate, counterpartyDisputeRate: noDoubleCount.metrics.counterpartyDisputeRate },
+    { bundleCount: 1, bundleRefs: 1, completionRate: 0, counterpartyAdjustedCompletionRate: null, counterpartyDisputeRate: 1 });
   rec("verify-reputation-reconcile-withdrawer", "verify", "§10.5.1/§10.11", "the WITHDRAWER scored over both copies → its own aborted-by-self self_copy → the aborter takes the hit (no counterparty fault)",
     { bundleCount: reconcileWithdrawer.bundleCount, completionRate: reconcileWithdrawer.metrics.completionRate, counterpartyDisputeRate: reconcileWithdrawer.metrics.counterpartyDisputeRate },
     { bundleCount: 1, completionRate: 0, counterpartyDisputeRate: 0 });
@@ -1975,8 +1981,15 @@ rec("cd1-positivity", "decimal", "§9.3", "amount MUST be > 0",
   rec("verify-reputation-rating-dedup", "verify", "§10.5.1", "ratings via resolver: (rater,jobId,targetRole) de-dup last-writer-wins by ratedAt (5 over 3) + no self-rating → averageBuyerRating 5",
     { averageBuyerRating: ratingDerivation.metrics.averageBuyerRating, averageSellerRating: ratingDerivation.metrics.averageSellerRating },
     { averageBuyerRating: 5, averageSellerRating: null });
-  rec("verify-reputation-volume-grouped", "verify", "§10.5.1", "observedTransactionalVolume sums agreement.terms.price by currency over reconciled bundles whose agreementRef resolves (5 × 5 usdc = 25)",
-    volumeDerivation.metrics.observedTransactionalVolume, [{ amount: "25", currency: "usdc" }]);
+  rec("verify-reputation-volume-grouped", "verify", "§10.5.1", "observedTransactionalVolume and transactionCountByCurrency aggregate completed sessions by currency",
+    {
+      observedTransactionalVolume: volumeDerivation.metrics.observedTransactionalVolume,
+      transactionCountByCurrency: volumeDerivation.metrics.transactionCountByCurrency,
+    },
+    {
+      observedTransactionalVolume: [{ amount: "5", currency: "usdc" }],
+      transactionCountByCurrency: [{ currency: "usdc", count: 1 }],
+    });
   rec("verify-reputation-relabel-attack-defeated", "verify", "§10.5.1/§10.4.2", "role_of_party is the externally-known binding, not self-declared `parties`: a buyer bundle that relabels its own claim still reads aborted-by-self literally (NOT flipped to a counterparty fault)",
     { bundleCount: relabelDefeated.bundleCount, counterpartyDisputeRate: relabelDefeated.metrics.counterpartyDisputeRate, completionRate: relabelDefeated.metrics.completionRate },
     { bundleCount: 1, counterpartyDisputeRate: 0, completionRate: 0 });
@@ -2027,6 +2040,7 @@ rec("cd1-positivity", "decimal", "§9.3", "amount MUST be > 0",
       sellerPerspectiveDisputeRate: sellerPerspective.metrics.counterpartyDisputeRate,
       ratingDedupAverageBuyer: ratingDerivation.metrics.averageBuyerRating,
       volumeGrouped: volumeDerivation.metrics.observedTransactionalVolume,
+      transactionCountGrouped: volumeDerivation.metrics.transactionCountByCurrency,
       misanchoredRoleSignatureRejected: misanchoredVerdict,
       unverifiedSignatureRejected: unverifiedSigVerdict,
       windowBoundaryInclusiveCount: boundaryInclusive.bundleCount,

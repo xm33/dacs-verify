@@ -1,0 +1,310 @@
+import { writeFileSync } from "node:fs";
+import { canonicalize } from "../canonicalize.ts";
+import { sha256Hex } from "../hash.ts";
+import {
+  evaluatePrePayGate,
+  hashSecurityVectors,
+  signAgreement,
+  verifyAgreementArtifact,
+  verifyWithDomain,
+  type AgreementArtifact,
+  type AgreementParty,
+  type BindingContext,
+  type CommitPhaseKind,
+  type GateResult,
+  type ListingFixture,
+  type PaymentPhaseInput,
+  type ReaderMode,
+} from "./payeeBinding.ts";
+
+type Vector = Record<string, unknown> & {
+  name: string;
+  rule: string;
+  op: string;
+  expected: "pass" | "fail" | "indeterminate" | "error";
+  note: string;
+};
+
+const GENERATED_AT = 1720968000000;
+const JOB_ID = "pb-job-2026-07-14";
+const EVM_RAIL = "evm-erc20:8453:USDC";
+const DEM_RAIL = "demos-native:DEM";
+const GOOD_EVM_PAYEE = "0x1111111111111111111111111111111111111111";
+const OTHER_EVM_PAYEE = "0x2222222222222222222222222222222222222222";
+const DEM_PAYEE = "0x1111111111111111111111111111111111111111111111111111111111111111";
+
+const parties: AgreementParty[] = [
+  { role: "buyer", primaryClaim: "cci-lei:984500PBBUYER000001", signingKey: "fixture:buyer" },
+  { role: "seller", primaryClaim: "cci-lei:984500PBSELLER00001", signingKey: "fixture:seller" },
+];
+
+const deliverable = {
+  deliverableType: "storage-program",
+  hash: sha256Hex("pb-deliverable"),
+};
+
+const listing: ListingFixture = {
+  listingId: "did:demos:agent:pb-fixture/payee-binding/1",
+  version: 1,
+  contentHash: sha256Hex("pb-listing"),
+  pipeline: [
+    { kind: "negotiate-fixed-price" },
+    { kind: "commit-payee-bound-agreement" },
+    { kind: "pay-evm-erc20", parameters: { rail: EVM_RAIL } },
+    { kind: "deliver-storage-program" },
+  ],
+};
+
+const legacyListing: ListingFixture = {
+  ...listing,
+  pipeline: [
+    { kind: "negotiate-fixed-price" },
+    { kind: "commit-agreement" },
+    { kind: "pay-evm-erc20", parameters: { rail: EVM_RAIL } },
+    { kind: "deliver-storage-program" },
+  ],
+};
+
+const repeatedPayListing: ListingFixture = {
+  ...listing,
+  listingId: "did:demos:agent:pb-fixture/payee-binding-repeated/1",
+  contentHash: sha256Hex("pb-listing-repeated"),
+  pipeline: [
+    { kind: "negotiate-fixed-price" },
+    { kind: "commit-payee-bound-agreement" },
+    { kind: "pay-evm-erc20", parameters: { rail: EVM_RAIL } },
+    { kind: "pay-evm-erc20", parameters: { rail: EVM_RAIL } },
+    { kind: "deliver-storage-program" },
+  ],
+};
+
+function baseArtifact(version: "legacy" | "payee-bound", bindings = [{ railId: EVM_RAIL, phaseIndex: 2, payeeAddress: GOOD_EVM_PAYEE }], forListing: ListingFixture = listing): AgreementArtifact {
+  const artifact = {
+    ...(version === "legacy" ? { agreementVersion: "1" as const } : { payeeBoundAgreementVersion: "1" as const }),
+    jobId: JOB_ID,
+    listingRef: { listingId: forListing.listingId, version: forListing.version, contentHash: forListing.contentHash },
+    parties,
+    derivedFromPattern: "fixed-price" as const,
+    terms: {
+      price: { amount: "10", currency: "USDC" },
+      rail: EVM_RAIL,
+      deliverable,
+      deadline: GENERATED_AT + 3_600_000,
+      ...(version === "payee-bound" ? { payoutBindings: bindings } : {}),
+    },
+    generatedAt: GENERATED_AT,
+  };
+  return signAgreement(artifact, version === "legacy" ? "dacs-agreement:v1:" : "dacs-payee-bound-agreement:v1:");
+}
+
+function unsigned(artifact: AgreementArtifact): Omit<AgreementArtifact, "signatures"> {
+  const { signatures: _signatures, ...rest } = artifact;
+  return rest;
+}
+
+function phaseInput(payeeAddress = GOOD_EVM_PAYEE, railId = EVM_RAIL, phaseIndex = 2): PaymentPhaseInput {
+  return {
+    jobId: JOB_ID,
+    railId,
+    phaseIndex,
+    payee: {
+      bundleHash: "sha256:payee-bundle-fixture",
+      primaryClaim: "cci-lei:984500PBSELLER00001",
+      payeeAddress,
+    },
+  };
+}
+
+function artifactVector(
+  name: string,
+  rule: string,
+  note: string,
+  artifact: AgreementArtifact,
+  forListing: ListingFixture,
+  commitPhase: CommitPhaseKind,
+  readerMode: ReaderMode,
+): Vector {
+  const result = verifyAgreementArtifact(artifact, forListing, commitPhase, readerMode);
+  return {
+    name,
+    rule,
+    op: "agreement-artifact-gate",
+    expected: result.expected,
+    note,
+    readerMode,
+    commitPhase,
+    listing: forListing,
+    agreement: artifact,
+    artifactHash: result.artifactHash,
+    signatureDomain: result.signatureDomain,
+    want: result,
+  };
+}
+
+function domainVector(
+  name: string,
+  rule: string,
+  note: string,
+  artifact: AgreementArtifact,
+  domain: "dacs-agreement:v1:" | "dacs-payee-bound-agreement:v1:",
+): Vector {
+  const result = verifyWithDomain(artifact, domain);
+  return {
+    name,
+    rule,
+    op: "agreement-signature-domain",
+    expected: result.expected,
+    note,
+    signatureDomain: domain,
+    agreement: artifact,
+    artifactHash: result.artifactHash,
+    want: result,
+  };
+}
+
+function gateVector(
+  name: string,
+  rule: string,
+  note: string,
+  artifact: AgreementArtifact,
+  input: PaymentPhaseInput,
+  context: BindingContext,
+  forListing: ListingFixture = listing,
+): Vector {
+  const result = evaluatePrePayGate(artifact, forListing, input, context);
+  return {
+    name,
+    rule,
+    op: "pre-pay-destination-gate",
+    expected: result.expected,
+    note,
+    listing: forListing,
+    agreement: artifact,
+    phaseInput: input,
+    bindingContext: context,
+    want: result,
+  };
+}
+
+function repeatedPayVector(): Vector {
+  const artifact = baseArtifact("payee-bound", [
+    { railId: EVM_RAIL, phaseIndex: 2, payeeAddress: GOOD_EVM_PAYEE },
+    { railId: EVM_RAIL, phaseIndex: 3, payeeAddress: OTHER_EVM_PAYEE },
+  ], repeatedPayListing);
+  const phaseInputs = [phaseInput(GOOD_EVM_PAYEE, EVM_RAIL, 2), phaseInput(OTHER_EVM_PAYEE, EVM_RAIL, 3)];
+  const results: GateResult[] = phaseInputs.map((input) => evaluatePrePayGate(artifact, repeatedPayListing, input, { tier3AgreementAssertionPresent: true }));
+  return {
+    name: "pb1-repeated-pay-phases-distinct-bindings",
+    rule: "PB-1",
+    op: "pre-pay-destination-gate",
+    expected: results.every((r) => r.expected === "pass") ? "pass" : "fail",
+    note: "Two repeated pay phases share a railId but different phaseIndex values; each resolves the independently signed destination for its tuple.",
+    listing: repeatedPayListing,
+    agreement: artifact,
+    phaseInputs,
+    want: { results },
+  };
+}
+
+export function buildPayeeBindingVectorSet() {
+  const legacy = baseArtifact("legacy", [], legacyListing);
+  const payeeBound = baseArtifact("payee-bound");
+  const both = signAgreement({ ...unsigned(payeeBound), agreementVersion: "1" }, "dacs-payee-bound-agreement:v1:");
+  const { payeeBoundAgreementVersion: _neitherVersion, ...neitherRest } = unsigned(payeeBound);
+  const neither = signAgreement(neitherRest, "dacs-payee-bound-agreement:v1:");
+  const { payoutBindings: _payoutBindings, ...strippedTerms } = payeeBound.terms;
+  const { payeeBoundAgreementVersion: _strippedVersion, ...strippedRest } = unsigned(payeeBound);
+  const stripped = signAgreement({
+    ...strippedRest,
+    agreementVersion: "1",
+    terms: strippedTerms,
+  }, "dacs-payee-bound-agreement:v1:");
+
+  const vectors: Vector[] = [
+    artifactVector("agreement-legacy-reader-accepts-legacy", "§8.5 compatibility", "A legacy reader accepts a valid AgreementDocument and applies no PB claim.", legacy, legacyListing, "commit-agreement", "legacy"),
+    artifactVector("agreement-legacy-reader-refuses-payee-bound", "§8.5 compatibility", "A legacy reader structurally refuses PayeeBoundAgreementDocument before invoking any pay handler.", payeeBound, listing, "commit-payee-bound-agreement", "legacy"),
+    artifactVector("agreement-current-reader-accepts-legacy-no-pb", "§8.5 compatibility", "A current reader still accepts a legacy AgreementDocument, but PB-1..PB-3 do not apply.", legacy, legacyListing, "commit-agreement", "current"),
+    artifactVector("agreement-current-reader-accepts-payee-bound", "§8.5 compatibility", "A current reader accepts PayeeBoundAgreementDocument when the artifact, phase, signatures, and payout coverage are coherent.", payeeBound, listing, "commit-payee-bound-agreement", "current"),
+    artifactVector("agreement-both-discriminators-reject", "§8.5 compatibility", "An artifact carrying both agreementVersion and payeeBoundAgreementVersion rejects at the discriminator gate.", both, listing, "commit-payee-bound-agreement", "current"),
+    artifactVector("agreement-neither-discriminator-reject", "§8.5 compatibility", "An artifact carrying neither version discriminator rejects at the discriminator gate.", neither, listing, "commit-payee-bound-agreement", "current"),
+    artifactVector("agreement-commit-agreement-with-payee-bound-rejects", "CA-5", "commit-agreement MUST NOT coerce a PayeeBoundAgreementDocument into the legacy type.", payeeBound, listing, "commit-agreement", "current"),
+    artifactVector("agreement-commit-payee-bound-with-legacy-rejects", "CA-5", "commit-payee-bound-agreement MUST NOT coerce a legacy AgreementDocument into the payee-bound type.", legacy, legacyListing, "commit-payee-bound-agreement", "current"),
+    domainVector("agreement-legacy-signature-domain-rejects-payee-bound", "SIG-2", "A PayeeBoundAgreementDocument signature does not verify under dacs-agreement:v1:.", payeeBound, "dacs-agreement:v1:"),
+    domainVector("agreement-payee-bound-signature-domain-rejects-legacy", "SIG-2", "A legacy AgreementDocument signature does not verify under dacs-payee-bound-agreement:v1:.", legacy, "dacs-payee-bound-agreement:v1:"),
+    artifactVector("agreement-stripped-payee-bound-cannot-downgrade", "§8.5 compatibility", "Stripping payeeBoundAgreementVersion/payoutBindings and retrying as legacy changes the signed domain and fails signature verification.", stripped, legacyListing, "commit-agreement", "current"),
+
+    gateVector("pb1-agreement-bound-destination-matches", "PB-1/PB-2", "The phase tuple resolves to a signed payout binding and tier 3 is applicable, so the payer may submit.", payeeBound, phaseInput(), { tier3AgreementAssertionPresent: true }),
+    gateVector("pb1-destination-mismatch-aborts-before-pay", "PB-1", "The phase payeeAddress differs from the signed payout binding; the handler aborts before payment.", payeeBound, phaseInput(OTHER_EVM_PAYEE), { tier3AgreementAssertionPresent: true }),
+    gateVector("pb1-missing-payoutbinding-permanent", "PB-1", "A PayeeBoundAgreementDocument missing the phase tuple is an incomplete artifact and fails permanently before Settle.", baseArtifact("payee-bound", []), phaseInput(), { tier3AgreementAssertionPresent: true }),
+    gateVector("pb1-duplicate-payoutbinding-permanent", "PB-1", "Duplicate (railId, phaseIndex) payout bindings make the payee-bound artifact invalid.", baseArtifact("payee-bound", [
+      { railId: EVM_RAIL, phaseIndex: 2, payeeAddress: GOOD_EVM_PAYEE },
+      { railId: EVM_RAIL, phaseIndex: 2, payeeAddress: GOOD_EVM_PAYEE },
+    ]), phaseInput(), { tier3AgreementAssertionPresent: true }),
+    gateVector("pb1-wrong-rail-payoutbinding-permanent", "PB-1", "A payout binding for the wrong railId does not cover the pinned pay phase and fails as malformed coverage.", baseArtifact("payee-bound", [{ railId: "evm-erc20:1:USDC", phaseIndex: 2, payeeAddress: GOOD_EVM_PAYEE }]), phaseInput(), { tier3AgreementAssertionPresent: true }),
+    gateVector("pb1-extra-payoutbinding-permanent", "PB-1", "An extra payout binding for a non-pay tuple makes the payee-bound artifact invalid before payment.", baseArtifact("payee-bound", [
+      { railId: EVM_RAIL, phaseIndex: 2, payeeAddress: GOOD_EVM_PAYEE },
+      { railId: EVM_RAIL, phaseIndex: 99, payeeAddress: GOOD_EVM_PAYEE },
+    ]), phaseInput(), { tier3AgreementAssertionPresent: true }),
+    repeatedPayVector(),
+
+    gateVector("pb2-tier2-resolves-different-address", "PB-2", "Tier 2 is applicable, but the controlled linked claim resolves to a different address than the signed destination.", payeeBound, phaseInput(), {
+      strongestApplicableTier: 2,
+      controlledLinkedClaim: `cci-xm:evm:8453:${OTHER_EVM_PAYEE}`,
+      verifyResult: { decision: "pass", reason: "controlled-linked-claim-resolved" },
+    }),
+    gateVector("pb2-tier2-controlled-claim-matches", "PB-2", "Tier 2 is applicable and the controlled linked claim resolves to the signed destination.", payeeBound, phaseInput(), {
+      strongestApplicableTier: 2,
+      controlledLinkedClaim: `cci-xm:evm:8453:${GOOD_EVM_PAYEE}`,
+      verifyResult: { decision: "pass", reason: "controlled-linked-claim-resolved" },
+    }),
+    gateVector("pb2-tier1-pay-dem-intrinsic-matches", "PB-2", "For pay-dem, the destination is definitionally the primary claim's Demos address and binds at tier 1.", baseArtifact("payee-bound", [{ railId: DEM_RAIL, phaseIndex: 2, payeeAddress: DEM_PAYEE }], { ...listing, pipeline: [{ kind: "negotiate-fixed-price" }, { kind: "commit-payee-bound-agreement" }, { kind: "pay-dem", parameters: { rail: DEM_RAIL } }] }), phaseInput(DEM_PAYEE, DEM_RAIL), {
+      strongestApplicableTier: 1,
+      tier1Intrinsic: true,
+    }, { ...listing, pipeline: [{ kind: "negotiate-fixed-price" }, { kind: "commit-payee-bound-agreement" }, { kind: "pay-dem", parameters: { rail: DEM_RAIL } }] }),
+    gateVector("pb2-tier2-applicable-unresolvable-pauses-no-tier3", "PB-2/PB-3", "Tier 2 is applicable but cannot resolve; the payer pauses with the VerifyResult and does not downgrade to tier 3.", payeeBound, phaseInput(), {
+      strongestApplicableTier: 2,
+      controlledLinkedClaim: `cci-xm:evm:8453:${GOOD_EVM_PAYEE}`,
+      verifyResult: { decision: "indeterminate", reason: "linked-claim-anchor-unavailable" },
+      tier3AgreementAssertionPresent: true,
+    }),
+    gateVector("pb2-tier2-resolver-error-no-downgrade", "PB-2/PB-3", "A tier-2 resolver error stays error, with no tier-3 downgrade and no payment.", payeeBound, phaseInput(), {
+      strongestApplicableTier: 2,
+      controlledLinkedClaim: `cci-xm:evm:8453:${GOOD_EVM_PAYEE}`,
+      verifyResult: { decision: "error", reason: "resolver-malformed-response" },
+      tier3AgreementAssertionPresent: true,
+    }),
+    gateVector("pb3-sb3-absent-fallback-not-imported", "PB-3", "SB-3 fallback semantics are settlement-evidence semantics and cannot satisfy the irreversible pre-pay PB gate.", payeeBound, phaseInput(), {
+      tier3AgreementAssertionPresent: false,
+      sb3FallbackAvailable: true,
+    }),
+  ];
+
+  return {
+    set: "payee-destination-binding-v0.1",
+    spec: "DACS-3 §8.5/§8.6 PayeeBoundAgreementDocument compatibility; DACS-4 §9.5.1 PB-1..PB-3",
+    gaps: [
+      "#231 PB conformance row and vectors",
+      "#236 PayeeBoundAgreementDocument redesign compatibility matrix",
+    ],
+    decisionModel: "artifact gate plus pre-pay destination gate. Artifact failures are permanent pre-Settle failures; PB destination mismatch is counterparty; applicable-but-unresolvable tier 2 pauses as substrate; resolver errors remain error; valid legacy AgreementDocument carries no PB claim.",
+    hash: hashSecurityVectors(vectors),
+    count: vectors.length,
+    vectors,
+  };
+}
+
+export function emitPayeeBindingVectorSet(path?: string): void {
+  const set = buildPayeeBindingVectorSet();
+  const text = `${JSON.stringify(set, null, 2)}\n`;
+  if (path === undefined) {
+    process.stdout.write(text);
+  } else {
+    writeFileSync(path, text);
+    process.stdout.write(`wrote ${path} (${set.count} vectors, hash ${set.hash})\n`);
+  }
+}
+
+if (import.meta.main) {
+  const path = process.argv[2];
+  emitPayeeBindingVectorSet(path);
+}

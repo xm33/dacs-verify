@@ -46,8 +46,8 @@ test("SIG-2 domain separation: a listing signature does not verify as a bundle s
   expect(res.ok).toBe(false);
 });
 
-test("the §7.7 registry is the closed set (16 separators)", () => {
-  expect(Object.keys(DOMAIN_SEPARATOR_REGISTRY)).toHaveLength(16);
+test("the §7.7 registry is the closed set (17 separators)", () => {
+  expect(Object.keys(DOMAIN_SEPARATOR_REGISTRY)).toHaveLength(17);
   expect(isRegisteredSeparator("dacs-listing:v1:")).toBe(true);
   expect(isRegisteredSeparator("dacs-bundle:v1:")).toBe(true);
 });

@@ -21,6 +21,7 @@ export const DOMAIN_SEPARATOR_REGISTRY = Object.freeze({
   "dacs-2-recipe": "dacs-recipe:v1:",
   "dacs-3-channelmsg": "dacs-channelmsg:v1:",
   "dacs-3-agreement": "dacs-agreement:v1:",
+  "dacs-3-payee-bound-agreement": "dacs-payee-bound-agreement:v1:",
   "dacs-3-commitment": "dacs-commitment:v1:",
   "dacs-3-transcript": "dacs-transcript:v1:",
   "dacs-4-evidence": "dacs-evidence:v1:",

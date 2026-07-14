@@ -161,13 +161,13 @@
       "want": false
     },
     {
-      "id": "sig-registry-closed-16",
+      "id": "sig-registry-closed-17",
       "area": "signing",
       "spec": "§7.7",
-      "summary": "the domain-separator registry is the closed set of 16",
+      "summary": "the domain-separator registry is the closed set of 17",
       "status": "golden",
       "reason": "reference-verifier-accepted + byte-stable",
-      "want": 16
+      "want": 17
     },
     {
       "id": "sig-sig4-dacsx-disjoint",

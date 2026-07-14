@@ -245,8 +245,8 @@ rec("cd1-positivity", "decimal", "§9.3", "amount MUST be > 0",
   rec("sig-sig2-cross-domain", "signing", "§7.7", "SIG-2: a listing signature does not verify as a bundle signature",
     crossDomain.ok, false);
 
-  rec("sig-registry-closed-16", "signing", "§7.7", "the domain-separator registry is the closed set of 16",
-    Object.keys(DOMAIN_SEPARATOR_REGISTRY).length, 16);
+  rec("sig-registry-closed-17", "signing", "§7.7", "the domain-separator registry is the closed set of 17",
+    Object.keys(DOMAIN_SEPARATOR_REGISTRY).length, 17);
 
   rec("sig-sig4-dacsx-disjoint", "signing", "§7.7", "SIG-4: DACS-X separators are dacs-x-* and disjoint from the §7.7 registry",
     Object.values(DACS_X_SEPARATORS).every((s) => s.startsWith("dacs-x-") && !isRegisteredSeparator(s)), true);

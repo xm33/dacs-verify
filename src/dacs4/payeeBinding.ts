@@ -16,8 +16,8 @@ export type AgreementParty = {
 };
 
 export type AgreementSignature = {
-  partyRole: AgreementParty["role"];
-  publicKey: string;
+  party: string;
+  algorithm: "ed25519";
   value: string;
 };
 
@@ -128,12 +128,18 @@ export function signAgreement(artifact: Omit<AgreementArtifact, "signatures">, d
     const key = FIXTURE_KEYS[party.role];
     const privateKey = createPrivateKey({ key: key.privateJwk, format: "jwk" });
     return {
-      partyRole: party.role,
-      publicKey: key.publicJwk.x,
-      value: Buffer.from(nodeSign(null, signedBytes, privateKey)).toString("base64url"),
+      party: party.primaryClaim,
+      algorithm: "ed25519" as const,
+      value: Buffer.from(nodeSign(null, signedBytes, privateKey)).toString("base64"),
     };
   });
   return { ...artifact, signatures };
+}
+
+function keyForSignature(artifact: AgreementArtifact, signature: AgreementSignature): string | undefined {
+  const party = artifact.parties.find((candidate) => candidate.primaryClaim === signature.party);
+  if (party === undefined || signature.algorithm !== "ed25519") return undefined;
+  return FIXTURE_KEYS[party.role]?.publicJwk.x;
 }
 
 export function verifyAgreementArtifact(
@@ -163,8 +169,10 @@ export function verifyAgreementArtifact(
   const domain = hasLegacy ? LEGACY_DOMAIN : PAYEE_BOUND_DOMAIN;
   const hash = artifactHash(artifact);
   for (const signature of artifact.signatures) {
-    const publicKeyRaw = Buffer.from(signature.publicKey, "base64url");
-    const signatureRaw = Buffer.from(signature.value, "base64url");
+    const publicKey = keyForSignature(artifact, signature);
+    if (publicKey === undefined) return rejectArtifact("signatures", "permanent", "signature party is not a known ed25519 agreement party");
+    const publicKeyRaw = Buffer.from(publicKey, "base64url");
+    const signatureRaw = Buffer.from(signature.value, "base64");
     const result = verifyArtifactSignatureWithSeparator({
       separator: domain,
       doc: artifact,
@@ -196,11 +204,13 @@ export function verifyAgreementArtifact(
 export function verifyWithDomain(artifact: AgreementArtifact, domain: typeof LEGACY_DOMAIN | typeof PAYEE_BOUND_DOMAIN): ArtifactCheckResult {
   const hash = artifactHash(artifact);
   for (const signature of artifact.signatures) {
+    const publicKey = keyForSignature(artifact, signature);
+    if (publicKey === undefined) return rejectArtifact("signatures", "permanent", "signature party is not a known ed25519 agreement party");
     const result = verifyArtifactSignatureWithSeparator({
       separator: domain,
       doc: artifact,
-      publicKeyRaw: Buffer.from(signature.publicKey, "base64url"),
-      signatureRaw: Buffer.from(signature.value, "base64url"),
+      publicKeyRaw: Buffer.from(publicKey, "base64url"),
+      signatureRaw: Buffer.from(signature.value, "base64"),
       signatureFields: ["signatures"],
     });
     if (!result.ok) {

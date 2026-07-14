@@ -292,6 +292,13 @@ export function buildPayeeBindingVectorSet() {
   const payeeBound = baseArtifact("payee-bound");
   const payeeBoundOnLegacyCommit = baseArtifact("payee-bound", [{ railId: EVM_RAIL, phaseIndex: 2, payeeAddress: GOOD_EVM_PAYEE }], legacyListing);
   const legacyOnPayeeBoundCommit = baseArtifact("legacy", [], listing);
+  const legacyWithPayoutBindings = signAgreement({
+    ...unsigned(legacy),
+    terms: {
+      ...legacy.terms,
+      payoutBindings: [{ railId: EVM_RAIL, phaseIndex: 2, payeeAddress: GOOD_EVM_PAYEE }],
+    },
+  }, "dacs-agreement:v1:");
   const both = signAgreement({ ...unsigned(payeeBound), agreementVersion: "1" }, "dacs-payee-bound-agreement:v1:");
   const { payeeBoundAgreementVersion: _neitherVersion, ...neitherRest } = unsigned(payeeBound);
   const neither = signAgreement(neitherRest, "dacs-payee-bound-agreement:v1:");
@@ -316,6 +323,7 @@ export function buildPayeeBindingVectorSet() {
     artifactVector("agreement-legacy-reader-refuses-payee-bound", "§8.5 compatibility", "A legacy reader structurally refuses PayeeBoundAgreementDocument before invoking any pay handler.", payeeBound, listing, "commit-payee-bound-agreement", "legacy"),
     artifactVector("agreement-current-reader-accepts-legacy-no-pb", "§8.5 compatibility", "A current reader still accepts a legacy AgreementDocument, but PB-1..PB-3 do not apply.", legacy, legacyListing, "commit-agreement", "current"),
     artifactVector("agreement-current-reader-accepts-payee-bound", "§8.5 compatibility", "A current reader accepts PayeeBoundAgreementDocument when the artifact, phase, signatures, and payout coverage are coherent.", payeeBound, listing, "commit-payee-bound-agreement", "current"),
+    artifactVector("agreement-legacy-payoutbindings-reject", "§8.5 compatibility", "A legacy AgreementDocument MUST NOT carry terms.payoutBindings.", legacyWithPayoutBindings, legacyListing, "commit-agreement", "current"),
     artifactVector("agreement-both-discriminators-reject", "§8.5 compatibility", "An artifact carrying both agreementVersion and payeeBoundAgreementVersion rejects at the discriminator gate.", both, listing, "commit-payee-bound-agreement", "current"),
     artifactVector("agreement-legacy-reader-refuses-both-discriminators", "§8.5 compatibility", "A legacy reader also refuses an artifact carrying both version discriminators before action.", both, listing, "commit-payee-bound-agreement", "legacy"),
     artifactVector("agreement-neither-discriminator-reject", "§8.5 compatibility", "An artifact carrying neither version discriminator rejects at the discriminator gate.", neither, listing, "commit-payee-bound-agreement", "current"),

@@ -14,6 +14,7 @@ test("PB vector set covers artifact compatibility and payee binding gates", () =
   expect(set.vectors.map((v) => v.name)).toContain("agreement-legacy-reader-refuses-payee-bound");
   expect(set.vectors.map((v) => v.name)).toContain("agreement-legacy-reader-refuses-both-discriminators");
   expect(set.vectors.map((v) => v.name)).toContain("agreement-legacy-reader-refuses-neither-discriminator");
+  expect(set.vectors.map((v) => v.name)).toContain("agreement-legacy-payoutbindings-reject");
   expect(set.vectors.map((v) => v.name)).toContain("agreement-commit-agreement-with-payee-bound-rejects");
   expect(set.vectors.map((v) => v.name)).toContain("agreement-legacy-signature-domain-rejects-payee-bound");
   expect(set.vectors.map((v) => v.name)).toContain("pb1-missing-payoutbinding-permanent");

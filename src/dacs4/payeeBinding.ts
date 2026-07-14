@@ -69,6 +69,7 @@ export type PaymentPhaseInput = {
 export type BindingContext = {
   strongestApplicableTier?: 1 | 2 | 3;
   tier1Intrinsic?: boolean;
+  tier2Applicable?: boolean;
   controlledLinkedClaim?: string;
   verifyResult?: { decision: "pass" | "indeterminate" | "error"; reason: string };
   tier3AgreementAssertionPresent?: boolean;
@@ -248,7 +249,7 @@ export function evaluatePrePayGate(artifact: AgreementArtifact, listing: Listing
   if (bindingContext.strongestApplicableTier === 1 || bindingContext.tier1Intrinsic) {
     return passGate(1, binding.payeeAddress, "tier-1 intrinsic destination binding holds");
   }
-  if (bindingContext.strongestApplicableTier === 2 || bindingContext.controlledLinkedClaim !== undefined || bindingContext.verifyResult !== undefined) {
+  if (bindingContext.strongestApplicableTier === 2 || bindingContext.tier2Applicable || bindingContext.controlledLinkedClaim !== undefined || bindingContext.verifyResult !== undefined) {
     const verifyResult = bindingContext.verifyResult;
     if (verifyResult?.decision === "error") {
       return { expected: "error", maySubmitPayment: false, ok: false, errorClass: "permanent", failedAt: "payee.primaryClaim.binding", reason: verifyResult.reason, recordedVerifyResultEquals: verifyResult, mustNotUseTier3: true };

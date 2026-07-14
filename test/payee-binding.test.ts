@@ -12,13 +12,14 @@ test("PB vector set covers artifact compatibility and payee binding gates", () =
   expect(set.count).toBe(set.vectors.length);
   expect(set.vectors.length).toBeGreaterThanOrEqual(20);
   expect(set.vectors.map((v) => v.name)).toContain("agreement-legacy-reader-refuses-payee-bound");
+  expect(set.vectors.map((v) => v.name)).toContain("agreement-legacy-reader-refuses-both-discriminators");
   expect(set.vectors.map((v) => v.name)).toContain("agreement-commit-agreement-with-payee-bound-rejects");
   expect(set.vectors.map((v) => v.name)).toContain("agreement-legacy-signature-domain-rejects-payee-bound");
   expect(set.vectors.map((v) => v.name)).toContain("pb1-missing-payoutbinding-permanent");
   expect(set.vectors.map((v) => v.name)).toContain("pb1-duplicate-payoutbinding-permanent");
   expect(set.vectors.map((v) => v.name)).toContain("pb1-wrong-rail-payoutbinding-permanent");
   expect(set.vectors.map((v) => v.name)).toContain("pb1-extra-payoutbinding-permanent");
-  expect(set.vectors.map((v) => v.name)).toContain("pb2-no-satisfiable-tier-refuses");
+  expect(set.vectors.map((v) => v.name)).not.toContain("pb2-no-satisfiable-tier-refuses");
 });
 
 test("PB vector agreement signatures are self-contained with public keys", () => {
@@ -30,6 +31,7 @@ test("PB vector agreement signatures are self-contained with public keys", () =>
       | { signatures?: { party: string; value: string }[] }
       | undefined;
     if (!Array.isArray(agreement?.signatures)) continue;
+    expect(vector.artifactHash).toMatch(/^[0-9a-f]{64}$/);
 
     for (const signature of agreement.signatures) {
       expect(set.publicKeys[signature.party]).toBeString();
@@ -79,8 +81,4 @@ test("artifact-shape failures classify as permanent and tier-2 unresolved stays 
   expect(sb3?.expected).toBe("indeterminate");
   expect((sb3?.want as { maySubmitPayment?: boolean }).maySubmitPayment).toBe(false);
   expect((sb3?.want as { mustNotApplySb3Fallback?: boolean }).mustNotApplySb3Fallback).toBe(true);
-
-  const noTier = set.vectors.find((v) => v.name === "pb2-no-satisfiable-tier-refuses");
-  expect(noTier?.expected).toBe("fail");
-  expect((noTier?.want as { reason?: string }).reason).toBe("no satisfiable PB tier for a valid payee-bound artifact");
 });

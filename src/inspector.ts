@@ -1,5 +1,6 @@
 import { canonicalize } from "./canonicalize.ts";
 import { sha256Hex } from "./hash.ts";
+import { buildSignedBytes, verifyEd25519 } from "./signing.ts";
 import {
   bundleHash,
   verifyBundle,
@@ -7,7 +8,7 @@ import {
   type BundleDecision,
 } from "./dacs5/index.ts";
 
-export type EvidenceArtifactType = "dacs-5-attestation-bundle";
+export type EvidenceArtifactType = "dacs-5-attestation-bundle" | "directory-sample-receipt";
 export type EvidenceInspectionStatus = "verified" | "rejected" | "indeterminate" | "error" | "blocked";
 export type EvidenceCheckStatus = "pass" | "fail" | "indeterminate" | "error" | "blocked";
 export type BlockedReason =
@@ -34,6 +35,9 @@ export interface EvidenceInspectionInput {
     jobId?: string;
     expectedDecision?: BundleDecision;
     expectedBundleHash?: string;
+    listingId?: string;
+    expectedReceiptHash?: string;
+    expectedMaturity?: string;
   };
   /** Claim -> Ed25519 public key as 64-hex, 0x64-hex, or base64url. */
   publicKeys?: Record<string, string>;
@@ -82,6 +86,7 @@ const LIMITATIONS = [
 const HASH_RE = /^[0-9a-f]{64}$/;
 const DACS_VERIFY_0004_BUNDLE_HASH = "9e5ea58d198b459a2929d38019807c465ce9988dcb89c847cce8e80210df39ba";
 const DACS_VERIFY_0004_FULL_ARTIFACT_HASH = "a9c81cb97ce5a4e4a80678086ac34cd43b688ff2d3c195178d973307d24af981";
+const DIRECTORY_SAMPLE_SEPARATOR = "dacs-x-directory-sample-receipt:v0.1:";
 
 function safeInputHash(input: unknown): string {
   try {
@@ -145,6 +150,16 @@ function keyFromClaim(claim: string): Uint8Array | null {
   return publicKeyRaw.length === 32 ? publicKeyRaw : null;
 }
 
+function stringAt(value: Record<string, unknown> | null, key: string): string | null {
+  const candidate = value?.[key];
+  return typeof candidate === "string" ? candidate : null;
+}
+
+function boolAt(value: Record<string, unknown> | null, key: string): boolean | null {
+  const candidate = value?.[key];
+  return typeof candidate === "boolean" ? candidate : null;
+}
+
 function check(
   checks: EvidenceInspectionCheck[],
   id: string,
@@ -200,11 +215,14 @@ export function inspectEvidence(input: EvidenceInspectionInput): EvidenceInspect
     }
     check(checks, "input.envelope.parse", "Input envelope includes an object artifact", "pass");
 
-    if (artifactType !== "dacs-5-attestation-bundle") {
+    if (artifactType !== "dacs-5-attestation-bundle" && artifactType !== "directory-sample-receipt") {
       check(checks, "input.artifact-type", "Artifact type is supported", "blocked", undefined, artifactType);
       return blocked(input, artifactType, source, "unsupported-artifact-type", `unsupported artifactType: ${artifactType}`, checks);
     }
 
+    if (artifactType === "directory-sample-receipt") {
+      return inspectDirectorySampleReceipt(input as EvidenceInspectionInput, checks);
+    }
     return inspectBundle(input as EvidenceInspectionInput, checks);
   } catch (cause) {
     check(checks, "inspector.exception", "Inspector completed without exception", "error", undefined, cause instanceof Error ? cause.message : String(cause));
@@ -222,6 +240,210 @@ export function inspectEvidence(input: EvidenceInspectionInput): EvidenceInspect
       provenance: { repo: "mj-deving/dacs-verify" },
     };
   }
+}
+
+function directoryReceiptPayload(receipt: Record<string, unknown>): Record<string, unknown> {
+  const { authorship: _authorship, receiptHash: _receiptHash, ...payload } = receipt;
+  return payload;
+}
+
+function directoryReceiptHashScope(receipt: Record<string, unknown>): Record<string, unknown> {
+  const { receiptHash: _receiptHash, ...scope } = receipt;
+  return scope;
+}
+
+function inspectDirectorySampleReceipt(
+  input: EvidenceInspectionInput,
+  checks: EvidenceInspectionCheck[],
+): EvidenceInspectionResult {
+  const receipt = input.artifact as Record<string, unknown>;
+  const inputHash = safeInputHash(input);
+  const payload = directoryReceiptPayload(receipt);
+  const expectedSignedPayloadHash = sha256Hex(canonicalize(payload));
+  const expectedReceiptHash = sha256Hex(canonicalize(directoryReceiptHashScope(receipt)));
+  check(checks, "input.hash.jcs-sha256", "Input envelope hash is deterministic JCS sha256", "pass", "§7.1/§7.2", inputHash);
+  check(checks, "directory.receipt.hash", "Receipt hash recomputes over the signed receipt", "pass", "§7.2", expectedReceiptHash);
+
+  const listingRef = rec(receipt.listingRef);
+  const sampleProfile = rec(receipt.sampleProfile);
+  const receiptInput = rec(receipt.input);
+  const workProduct = rec(receipt.workProduct);
+  const authorship = rec(receipt.authorship);
+  const limitations = Array.isArray(receipt.limitations) ? receipt.limitations : [];
+
+  const basicShapeOk = (
+    stringAt(receipt, "receiptKind") !== null &&
+    receipt.receiptVersion === "0.1" &&
+    listingRef !== null &&
+    sampleProfile !== null &&
+    receiptInput !== null &&
+    workProduct !== null &&
+    authorship !== null &&
+    stringAt(receipt, "generatedAt") !== null &&
+    stringAt(receipt, "receiptHash") !== null
+  );
+  check(checks, "directory.receipt.shape", "Directory sample receipt has the required envelope fields", basicShapeOk ? "pass" : "fail");
+
+  const maturity = stringAt(sampleProfile, "maturity");
+  const sampleFlagsOk = (
+    maturity === "sample-backed" &&
+    boolAt(sampleProfile, "noLivePayment") === true &&
+    boolAt(sampleProfile, "noSourceTruthClaim") === true &&
+    boolAt(sampleProfile, "noLegalOrPerformanceClaim") === true
+  );
+  check(checks, "directory.receipt.sample-profile", "Sample profile states no live payment and explicit limitation flags", sampleFlagsOk ? "pass" : "fail");
+
+  if (input.expectations?.listingId !== undefined) {
+    const actual = stringAt(listingRef, "listingId");
+    check(
+      checks,
+      "directory.receipt.listing-id",
+      "Receipt listingId matches the expected listing",
+      actual === input.expectations.listingId ? "pass" : "fail",
+      undefined,
+      actual === input.expectations.listingId ? actual : `${actual ?? "missing"} !== ${input.expectations.listingId}`,
+    );
+  }
+
+  if (input.expectations?.expectedMaturity !== undefined) {
+    check(
+      checks,
+      "directory.receipt.maturity",
+      "Receipt maturity matches the expected sample stage",
+      maturity === input.expectations.expectedMaturity ? "pass" : "fail",
+      undefined,
+      maturity ?? "missing",
+    );
+  }
+
+  const inputDescriptor = rec(receiptInput?.descriptor);
+  const claimedInputHash = stringAt(receiptInput, "inputHash");
+  const recomputedInputHash = inputDescriptor === null ? null : sha256Hex(canonicalize(inputDescriptor));
+  check(
+    checks,
+    "directory.receipt.input-hash",
+    "Input descriptor hash recomputes",
+    recomputedInputHash !== null && claimedInputHash === recomputedInputHash ? "pass" : "fail",
+    "§7.2",
+    claimedInputHash ?? "missing",
+  );
+
+  const workDescriptor = rec(workProduct?.descriptor);
+  const claimedWorkHash = stringAt(workProduct, "contentHash");
+  const recomputedWorkHash = workDescriptor === null ? null : sha256Hex(canonicalize(workDescriptor));
+  check(
+    checks,
+    "directory.receipt.work-product-hash",
+    "Work-product descriptor hash recomputes",
+    recomputedWorkHash !== null && claimedWorkHash === recomputedWorkHash ? "pass" : "fail",
+    "§7.2",
+    claimedWorkHash ?? "missing",
+  );
+
+  const claimedSignedPayloadHash = stringAt(authorship, "signedPayloadHash");
+  check(
+    checks,
+    "directory.receipt.signed-payload-hash",
+    "Signed payload hash recomputes",
+    claimedSignedPayloadHash === expectedSignedPayloadHash ? "pass" : "fail",
+    "§7.2",
+    claimedSignedPayloadHash ?? "missing",
+  );
+
+  const claimedReceiptHash = stringAt(receipt, "receiptHash");
+  const receiptHashMatches = claimedReceiptHash === expectedReceiptHash;
+  check(
+    checks,
+    "directory.receipt.expected-hash",
+    "Receipt hash matches the supplied receiptHash",
+    receiptHashMatches ? "pass" : "fail",
+    "§7.2",
+    claimedReceiptHash ?? "missing",
+  );
+
+  if (input.expectations?.expectedReceiptHash !== undefined) {
+    check(
+      checks,
+      "directory.receipt.caller-expected-hash",
+      "Receipt hash matches the caller expected hash",
+      expectedReceiptHash === input.expectations.expectedReceiptHash ? "pass" : "fail",
+      "§7.2",
+      input.expectations.expectedReceiptHash,
+    );
+  }
+
+  const hasLimitationProfile = (
+    limitations.includes("sample-backed receipt") &&
+    limitations.includes("no live payment") &&
+    limitations.includes("not source truth") &&
+    limitations.includes("not reputation evidence")
+  );
+  check(checks, "directory.receipt.limitations", "Receipt carries explicit sample limitations", hasLimitationProfile ? "pass" : "fail");
+
+  const signer = stringAt(authorship, "signer");
+  const signature = stringAt(authorship, "signature");
+  const seller = stringAt(listingRef, "seller");
+  check(
+    checks,
+    "directory.receipt.signer-binding",
+    "Receipt signer matches the referenced listing seller",
+    signer !== null && seller !== null && signer === seller ? "pass" : "fail",
+    undefined,
+    signer !== null && seller !== null ? `${signer} -> ${seller}` : "missing signer or seller",
+  );
+
+  const publicKeys = input.publicKeys ?? {};
+  const publicKey = signer !== null
+    ? (publicKeys[signer] !== undefined ? decodePublicKey(publicKeys[signer]!) : keyFromClaim(signer))
+    : null;
+  let signatureStatus: EvidenceCheckStatus = signer === null || signature === null ? "fail" : "indeterminate";
+  let signatureDetail = signer ?? "missing signer";
+  if (publicKey !== null && signature !== null && claimedSignedPayloadHash === expectedSignedPayloadHash) {
+    try {
+      const ok = verifyEd25519(
+        publicKey,
+        buildSignedBytes(DIRECTORY_SAMPLE_SEPARATOR, expectedSignedPayloadHash),
+        new Uint8Array(Buffer.from(signature, "base64url")),
+      );
+      signatureStatus = ok ? "pass" : "fail";
+      signatureDetail = signer ?? "missing signer";
+    } catch (cause) {
+      signatureStatus = "error";
+      signatureDetail = cause instanceof Error ? cause.message : String(cause);
+    }
+  }
+  check(
+    checks,
+    "directory.receipt.signature",
+    "Receipt signature verifies over the directory sample payload",
+    signatureStatus,
+    undefined,
+    signatureDetail,
+  );
+
+  const failed = checks.some((entry) => entry.status === "fail" || entry.status === "error");
+  const indeterminate = checks.some((entry) => entry.status === "indeterminate");
+  const status: EvidenceInspectionStatus = failed ? "rejected" : indeterminate ? "indeterminate" : "verified";
+  const reason = failed
+    ? "directory sample receipt failed one or more verification checks"
+    : indeterminate
+      ? "directory sample receipt could not be fully verified with supplied keys"
+      : "directory sample receipt verified";
+
+  return {
+    inspectorVersion: "0.1.0",
+    generatedAt: generatedAt(),
+    input: {
+      artifactType: input.artifactType,
+      source: input.source,
+      inputHash,
+      artifactHash: expectedReceiptHash,
+    },
+    result: { status, reason },
+    checks,
+    limitations: LIMITATIONS,
+    provenance: { repo: "mj-deving/dacs-verify" },
+  };
 }
 
 function inspectBundle(input: EvidenceInspectionInput, checks: EvidenceInspectionCheck[]): EvidenceInspectionResult {

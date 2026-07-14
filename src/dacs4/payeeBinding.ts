@@ -11,7 +11,8 @@ export type ErrorClass = "permanent" | "counterparty" | "substrate";
 export type AgreementParty = {
   role: "buyer" | "seller" | "orchestrator";
   primaryClaim: string;
-  signingKey: string;
+  bundleHash: string;
+  vetRecordRef: { kind: string; id: string; contentHash: string };
 };
 
 export type AgreementSignature = {

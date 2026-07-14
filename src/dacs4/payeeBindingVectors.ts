@@ -35,8 +35,28 @@ const OTHER_EVM_PAYEE = "0x2222222222222222222222222222222222222222";
 const DEM_PAYEE = "0x1111111111111111111111111111111111111111111111111111111111111111";
 
 const parties: AgreementParty[] = [
-  { role: "buyer", primaryClaim: "cci-lei:984500PBBUYER000001", signingKey: "fixture:buyer" },
-  { role: "seller", primaryClaim: "cci-lei:984500PBSELLER00001", signingKey: "fixture:seller" },
+  {
+    role: "buyer",
+    primaryClaim: "cci-lei:984500PBBUYER000001",
+    bundleHash: `sha256:${sha256Hex("buyer-bundle")}`,
+    vetRecordRef: { kind: "dacs-2-composite", id: "vet-buyer", contentHash: sha256Hex("vet-buyer") },
+  },
+  {
+    role: "seller",
+    primaryClaim: "cci-lei:984500PBSELLER00001",
+    bundleHash: `sha256:${sha256Hex("seller-bundle")}`,
+    vetRecordRef: { kind: "dacs-2-composite", id: "vet-seller", contentHash: sha256Hex("vet-seller") },
+  },
+];
+
+const demosParties: AgreementParty[] = [
+  parties[0]!,
+  {
+    role: "seller",
+    primaryClaim: `cci-xm:demos:testnet:${DEM_PAYEE}`,
+    bundleHash: `sha256:${sha256Hex("seller-demos-bundle")}`,
+    vetRecordRef: { kind: "dacs-2-composite", id: "vet-seller-demos", contentHash: sha256Hex("vet-seller-demos") },
+  },
 ];
 
 const deliverable = {
@@ -79,12 +99,17 @@ const repeatedPayListing: ListingFixture = {
   ],
 };
 
-function baseArtifact(version: "legacy" | "payee-bound", bindings = [{ railId: EVM_RAIL, phaseIndex: 2, payeeAddress: GOOD_EVM_PAYEE }], forListing: ListingFixture = listing): AgreementArtifact {
+function baseArtifact(
+  version: "legacy" | "payee-bound",
+  bindings = [{ railId: EVM_RAIL, phaseIndex: 2, payeeAddress: GOOD_EVM_PAYEE }],
+  forListing: ListingFixture = listing,
+  artifactParties = parties,
+): AgreementArtifact {
   const artifact = {
     ...(version === "legacy" ? { agreementVersion: "1" as const } : { payeeBoundAgreementVersion: "1" as const }),
     jobId: JOB_ID,
     listingRef: { listingId: forListing.listingId, version: forListing.version, contentHash: forListing.contentHash },
-    parties,
+    parties: artifactParties,
     derivedFromPattern: "fixed-price" as const,
     terms: {
       price: { amount: "10", currency: "USDC" },
@@ -103,14 +128,14 @@ function unsigned(artifact: AgreementArtifact): Omit<AgreementArtifact, "signatu
   return rest;
 }
 
-function phaseInput(payeeAddress = GOOD_EVM_PAYEE, railId = EVM_RAIL, phaseIndex = 2): PaymentPhaseInput {
+function phaseInput(payeeAddress = GOOD_EVM_PAYEE, railId = EVM_RAIL, phaseIndex = 2, primaryClaim = "cci-lei:984500PBSELLER00001"): PaymentPhaseInput {
   return {
     jobId: JOB_ID,
     railId,
     phaseIndex,
     payee: {
       bundleHash: "sha256:payee-bundle-fixture",
-      primaryClaim: "cci-lei:984500PBSELLER00001",
+      primaryClaim,
       payeeAddress,
     },
   };
@@ -258,7 +283,7 @@ export function buildPayeeBindingVectorSet() {
       controlledLinkedClaim: `cci-xm:evm:8453:${GOOD_EVM_PAYEE}`,
       verifyResult: { decision: "pass", reason: "controlled-linked-claim-resolved" },
     }),
-    gateVector("pb2-tier1-pay-dem-intrinsic-matches", "PB-2", "For pay-dem, the destination is definitionally the primary claim's Demos address and binds at tier 1.", baseArtifact("payee-bound", [{ railId: DEM_RAIL, phaseIndex: 2, payeeAddress: DEM_PAYEE }], { ...listing, pipeline: [{ kind: "negotiate-fixed-price" }, { kind: "commit-payee-bound-agreement" }, { kind: "pay-dem", parameters: { rail: DEM_RAIL } }] }), phaseInput(DEM_PAYEE, DEM_RAIL), {
+    gateVector("pb2-tier1-pay-dem-intrinsic-matches", "PB-2", "For pay-dem, the destination is definitionally the primary claim's Demos address and binds at tier 1.", baseArtifact("payee-bound", [{ railId: DEM_RAIL, phaseIndex: 2, payeeAddress: DEM_PAYEE }], { ...listing, pipeline: [{ kind: "negotiate-fixed-price" }, { kind: "commit-payee-bound-agreement" }, { kind: "pay-dem", parameters: { rail: DEM_RAIL } }] }, demosParties), phaseInput(DEM_PAYEE, DEM_RAIL, 2, `cci-xm:demos:testnet:${DEM_PAYEE}`), {
       strongestApplicableTier: 1,
       tier1Intrinsic: true,
     }, { ...listing, pipeline: [{ kind: "negotiate-fixed-price" }, { kind: "commit-payee-bound-agreement" }, { kind: "pay-dem", parameters: { rail: DEM_RAIL } }] }),

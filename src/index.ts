@@ -5,6 +5,7 @@ export * from "./logical-address.ts";
 export * from "./signing.ts";
 export * from "./dacs1.ts";
 export * from "./report.ts";
+export * from "./inspector.ts";
 export * as dacsx from "./dacsx/index.ts";
 export * as dacs2 from "./dacs2/index.ts";
 export * as dacs3 from "./dacs3/agreement.ts";

@@ -18,6 +18,7 @@ test("PB vector set covers artifact compatibility and payee binding gates", () =
   expect(set.vectors.map((v) => v.name)).toContain("pb1-duplicate-payoutbinding-permanent");
   expect(set.vectors.map((v) => v.name)).toContain("pb1-wrong-rail-payoutbinding-permanent");
   expect(set.vectors.map((v) => v.name)).toContain("pb1-extra-payoutbinding-permanent");
+  expect(set.vectors.map((v) => v.name)).toContain("pb2-no-satisfiable-tier-refuses");
 });
 
 test("PB vector agreement signatures are self-contained with public keys", () => {
@@ -62,4 +63,9 @@ test("artifact-shape failures classify as permanent and tier-2 unresolved stays 
   const sb3 = set.vectors.find((v) => v.name === "pb3-sb3-absent-fallback-not-imported");
   expect(sb3?.expected).toBe("indeterminate");
   expect((sb3?.want as { maySubmitPayment?: boolean }).maySubmitPayment).toBe(false);
+  expect((sb3?.want as { mustNotApplySb3Fallback?: boolean }).mustNotApplySb3Fallback).toBe(true);
+
+  const noTier = set.vectors.find((v) => v.name === "pb2-no-satisfiable-tier-refuses");
+  expect(noTier?.expected).toBe("fail");
+  expect((noTier?.want as { reason?: string }).reason).toBe("no satisfiable PB tier for a valid payee-bound artifact");
 });

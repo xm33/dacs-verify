@@ -73,6 +73,7 @@ export type BindingContext = {
   verifyResult?: { decision: "pass" | "indeterminate" | "error"; reason: string };
   tier3AgreementAssertionPresent?: boolean;
   sb3FallbackAvailable?: boolean;
+  sb3JobIdBinding?: "absent-or-unverifiable";
 };
 
 export type GateResult = {
@@ -85,6 +86,7 @@ export type GateResult = {
   boundDestination?: string;
   sessionTransition?: "paused";
   recordedVerifyResultEquals?: BindingContext["verifyResult"];
+  mustNotApplySb3Fallback?: boolean;
   reason: string;
 };
 
@@ -248,10 +250,20 @@ export function evaluatePrePayGate(artifact: AgreementArtifact, listing: Listing
   if (bindingContext.strongestApplicableTier === 2 || bindingContext.controlledLinkedClaim !== undefined || bindingContext.verifyResult !== undefined) {
     const verifyResult = bindingContext.verifyResult;
     if (verifyResult?.decision === "error") {
-      return { expected: "error", maySubmitPayment: false, ok: false, failedAt: "payee.primaryClaim.binding", reason: verifyResult.reason, recordedVerifyResultEquals: verifyResult };
+      return { expected: "error", maySubmitPayment: false, ok: false, errorClass: "permanent", failedAt: "payee.primaryClaim.binding", reason: verifyResult.reason, recordedVerifyResultEquals: verifyResult };
     }
     if (verifyResult?.decision === "indeterminate") {
-      return { expected: "indeterminate", maySubmitPayment: false, ok: false, errorClass: "substrate", sessionTransition: "paused", failedAt: "payee.primaryClaim.binding", reason: verifyResult.reason, recordedVerifyResultEquals: verifyResult };
+      return {
+        expected: "indeterminate",
+        maySubmitPayment: false,
+        ok: false,
+        errorClass: "substrate",
+        sessionTransition: "paused",
+        failedAt: "payee.primaryClaim.binding",
+        reason: verifyResult.reason,
+        recordedVerifyResultEquals: verifyResult,
+        ...(bindingContext.sb3FallbackAvailable ? { mustNotApplySb3Fallback: true } : {}),
+      };
     }
     const linkedAddress = bindingContext.controlledLinkedClaim?.split(":").at(-1);
     if (verifyResult?.decision === "pass" && linkedAddress === binding.payeeAddress) {

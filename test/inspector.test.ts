@@ -9,10 +9,18 @@ import { buildSignedBytes, DOMAIN_SEPARATOR_REGISTRY } from "../src/signing.ts";
 import { inspectEvidence, type EvidenceInspectionInput } from "../src/inspector.ts";
 import {
   BUNDLE_SIGNED_SCOPE_OMIT,
+  bundleAddress,
   bundleHash,
   type AttestationBundle,
   type BundleSignature,
 } from "../src/dacs5/index.ts";
+import {
+  buildSessionBundleFixtures,
+  VERIFY_BUYER_CLAIM,
+  VERIFY_DIVERGENT_JOB_ID,
+  VERIFY_ONE_SIDED_JOB_ID,
+  VERIFY_SELLER_CLAIM,
+} from "../examples/session-bundles.ts";
 import { keypairFromSeed, signArtifact, type Keypair } from "../examples/issuer-kit.ts";
 
 const fixturePath = join(import.meta.dir, "..", "conformance", "fixtures", "attestation-bundle-0004.json");
@@ -188,6 +196,37 @@ const directoryServiceProfileInput = (maturity = "listed", sampleReceipt?: Retur
   },
 });
 
+function directoryDealInput(input: {
+  jobId: string;
+  buyerBundle?: AttestationBundle;
+  sellerBundle?: AttestationBundle;
+  publicKeys: Record<string, string>;
+}): EvidenceInspectionInput {
+  return {
+    artifactType: "directory-deal",
+    source: {
+      kind: "fixture",
+      label: "Directory deal fixture",
+      url: "examples/session-bundles.ts",
+    },
+    artifact: {
+      dealKind: "directory-deal",
+      dealVersion: "0.1",
+      jobId: input.jobId,
+      owners: {
+        buyer: VERIFY_BUYER_CLAIM,
+        seller: VERIFY_SELLER_CLAIM,
+      },
+      ...(input.buyerBundle !== undefined ? { buyerBundle: input.buyerBundle } : {}),
+      ...(input.sellerBundle !== undefined ? { sellerBundle: input.sellerBundle } : {}),
+    },
+    expectations: {
+      jobId: input.jobId,
+    },
+    publicKeys: input.publicKeys,
+  };
+}
+
 test("Evidence Inspector verifies the DACS-VERIFY-0004 bundle fixture", () => {
   const result = inspectEvidence(baseInput());
   expect(result.result.status).toBe("verified");
@@ -344,6 +383,90 @@ test("Evidence Inspector derives verifier keys from key base64url claims", () =>
   const result = inspectEvidence(input);
   expect(result.result.status).toBe("verified");
   expect(result.result.decision).toBe("pass");
+});
+
+test("Evidence Inspector verifies a unified Directory deal", () => {
+  const fixtures = buildSessionBundleFixtures();
+  const buyerBundle = fixtures.fetchUnified(bundleAddress(VERIFY_DIVERGENT_JOB_ID, "buyer"));
+  const sellerBundle = fixtures.fetchUnified(bundleAddress(VERIFY_DIVERGENT_JOB_ID, "seller"));
+  const input = directoryDealInput({
+    jobId: VERIFY_DIVERGENT_JOB_ID,
+    buyerBundle: buyerBundle!,
+    sellerBundle: sellerBundle!,
+    publicKeys: fixtures.publicKeys,
+  });
+  input.expectations!.expectedVerdict = "unified";
+  const result = inspectEvidence(input);
+  expect(result.result.status).toBe("verified");
+  expect(result.result.verdict).toBe("unified");
+  expect(result.result.reputation?.buyer.bundleCount).toBe(1);
+  expect(result.result.reputation?.seller.bundleCount).toBe(1);
+  expect(result.result.reputation?.buyer.completionRate).toBe(1);
+  expect(result.checks.find((entry) => entry.id === "directory.deal.no-fetch")?.status).toBe("pass");
+});
+
+test("Evidence Inspector reports a one-sided Directory deal without treating it as unified evidence", () => {
+  const fixtures = buildSessionBundleFixtures();
+  const input = directoryDealInput({
+    jobId: VERIFY_ONE_SIDED_JOB_ID,
+    buyerBundle: fixtures.oneSidedBuyer,
+    publicKeys: fixtures.publicKeys,
+  });
+  input.expectations!.expectedVerdict = "one-sided";
+  const result = inspectEvidence(input);
+  expect(result.result.status).toBe("rejected");
+  expect(result.result.verdict).toBe("one-sided");
+  expect(result.result.reputation?.buyer.bundleCount).toBe(1);
+  expect(result.result.reputation?.seller.bundleCount).toBe(1);
+  expect(result.checks.find((entry) => entry.id === "directory.deal.expected-verdict")?.status).toBe("pass");
+});
+
+test("Evidence Inspector reports a divergent Directory deal and drops it from strict reputation", () => {
+  const fixtures = buildSessionBundleFixtures();
+  const input = directoryDealInput({
+    jobId: VERIFY_DIVERGENT_JOB_ID,
+    buyerBundle: fixtures.divergentBuyer,
+    sellerBundle: fixtures.divergentSeller,
+    publicKeys: fixtures.publicKeys,
+  });
+  input.expectations!.expectedVerdict = "divergent";
+  const result = inspectEvidence(input);
+  expect(result.result.status).toBe("rejected");
+  expect(result.result.verdict).toBe("divergent");
+  expect(result.result.reputation?.buyer.bundleCount).toBe(0);
+  expect(result.result.reputation?.seller.bundleCount).toBe(0);
+});
+
+test("Evidence Inspector rejects a malformed Directory deal", () => {
+  const fixtures = buildSessionBundleFixtures();
+  const input = directoryDealInput({
+    jobId: VERIFY_DIVERGENT_JOB_ID,
+    buyerBundle: fixtures.divergentBuyer,
+    sellerBundle: fixtures.divergentSeller,
+    publicKeys: fixtures.publicKeys,
+  });
+  delete ((input.artifact as { owners?: unknown }).owners);
+  const result = inspectEvidence(input);
+  expect(result.result.status).toBe("rejected");
+  expect(result.result.verdict).toBeUndefined();
+  expect(result.checks.find((entry) => entry.id === "directory.deal.shape")?.status).toBe("fail");
+});
+
+test("Evidence Inspector rejects a Directory deal when the expected verdict is wrong", () => {
+  const fixtures = buildSessionBundleFixtures();
+  const buyerBundle = fixtures.fetchUnified(bundleAddress(VERIFY_DIVERGENT_JOB_ID, "buyer"));
+  const sellerBundle = fixtures.fetchUnified(bundleAddress(VERIFY_DIVERGENT_JOB_ID, "seller"));
+  const input = directoryDealInput({
+    jobId: VERIFY_DIVERGENT_JOB_ID,
+    buyerBundle: buyerBundle!,
+    sellerBundle: sellerBundle!,
+    publicKeys: fixtures.publicKeys,
+  });
+  input.expectations!.expectedVerdict = "divergent";
+  const result = inspectEvidence(input);
+  expect(result.result.status).toBe("rejected");
+  expect(result.result.verdict).toBe("unified");
+  expect(result.checks.find((entry) => entry.id === "directory.deal.expected-verdict")?.status).toBe("fail");
 });
 
 test("Evidence Inspector verifies a Directory sample receipt", () => {

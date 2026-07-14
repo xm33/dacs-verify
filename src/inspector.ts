@@ -2,14 +2,20 @@ import { canonicalize } from "./canonicalize.ts";
 import { sha256Hex } from "./hash.ts";
 import { buildSignedBytes, verifyEd25519 } from "./signing.ts";
 import {
+  bundleAddress,
   bundleHash,
+  consumeBundles,
+  deriveReputation,
   verifyBundle,
   type AttestationBundle,
+  type BundleKeyResolver,
   type BundleDecision,
+  type ConsumptionVerdict,
 } from "./dacs5/index.ts";
 
 export type EvidenceArtifactType =
   | "dacs-5-attestation-bundle"
+  | "directory-deal"
   | "directory-sample-receipt"
   | "directory-service-profile";
 export type EvidenceInspectionStatus = "verified" | "rejected" | "indeterminate" | "error" | "blocked";
@@ -37,6 +43,7 @@ export interface EvidenceInspectionInput {
   expectations?: {
     jobId?: string;
     expectedDecision?: BundleDecision;
+    expectedVerdict?: ConsumptionVerdict;
     expectedBundleHash?: string;
     listingId?: string;
     listingVersion?: number;
@@ -67,6 +74,19 @@ export interface EvidenceInspectionResult {
   result: {
     status: EvidenceInspectionStatus;
     decision?: BundleDecision;
+    verdict?: ConsumptionVerdict;
+    reputation?: {
+      buyer: {
+        bundleCount: number;
+        completionRate: number | null;
+        counterpartyAdjustedCompletionRate: number | null;
+      };
+      seller: {
+        bundleCount: number;
+        completionRate: number | null;
+        counterpartyAdjustedCompletionRate: number | null;
+      };
+    };
     blockedReason?: BlockedReason;
     reason: string;
   };
@@ -155,6 +175,12 @@ function keyFromClaim(claim: string): Uint8Array | null {
   return publicKeyRaw.length === 32 ? publicKeyRaw : null;
 }
 
+function resolveClaimPublicKey(claim: string, publicKeys: Record<string, string>): Uint8Array | null {
+  const explicit = publicKeys[claim];
+  if (explicit !== undefined) return decodePublicKey(explicit) ?? new Uint8Array([0]);
+  return keyFromClaim(claim);
+}
+
 function stringAt(value: Record<string, unknown> | null, key: string): string | null {
   const candidate = value?.[key];
   return typeof candidate === "string" ? candidate : null;
@@ -222,6 +248,7 @@ export function inspectEvidence(input: EvidenceInspectionInput): EvidenceInspect
 
     if (
       artifactType !== "dacs-5-attestation-bundle" &&
+      artifactType !== "directory-deal" &&
       artifactType !== "directory-sample-receipt" &&
       artifactType !== "directory-service-profile"
     ) {
@@ -234,6 +261,9 @@ export function inspectEvidence(input: EvidenceInspectionInput): EvidenceInspect
     }
     if (artifactType === "directory-sample-receipt") {
       return inspectDirectorySampleReceipt(input as EvidenceInspectionInput, checks);
+    }
+    if (artifactType === "directory-deal") {
+      return inspectDirectoryDeal(input as EvidenceInspectionInput, checks);
     }
     return inspectBundle(input as EvidenceInspectionInput, checks);
   } catch (cause) {
@@ -621,9 +651,7 @@ function inspectDirectorySampleReceipt(
   );
 
   const publicKeys = input.publicKeys ?? {};
-  const publicKey = signer !== null
-    ? (publicKeys[signer] !== undefined ? decodePublicKey(publicKeys[signer]!) : keyFromClaim(signer))
-    : null;
+  const publicKey = signer !== null ? resolveClaimPublicKey(signer, publicKeys) : null;
   let signatureStatus: EvidenceCheckStatus = signer === null || signature === null ? "fail" : "indeterminate";
   let signatureDetail = signer ?? "missing signer";
   if (publicKey !== null && signature !== null && claimedSignedPayloadHash === expectedSignedPayloadHash) {
@@ -674,6 +702,166 @@ function inspectDirectorySampleReceipt(
   };
 }
 
+function inspectDirectoryDeal(input: EvidenceInspectionInput, checks: EvidenceInspectionCheck[]): EvidenceInspectionResult {
+  const deal = input.artifact as Record<string, unknown>;
+  const inputHash = safeInputHash(input);
+  const artifactHash = sha256Hex(canonicalize(deal));
+  check(checks, "input.hash.jcs-sha256", "Input envelope hash is deterministic JCS sha256", "pass", "§7.1/§7.2", inputHash);
+  check(checks, "directory.deal.hash", "Directory deal envelope hash is deterministic JCS sha256", "pass", "§7.2", artifactHash);
+
+  const owners = rec(deal.owners);
+  const jobId = stringAt(deal, "jobId");
+  const buyer = stringAt(owners, "buyer");
+  const seller = stringAt(owners, "seller");
+  const buyerBundle = rec(deal.buyerBundle) as AttestationBundle | null;
+  const sellerBundle = rec(deal.sellerBundle) as AttestationBundle | null;
+  const shapeOk = (
+    deal.dealKind === "directory-deal" &&
+    deal.dealVersion === "0.1" &&
+    jobId !== null &&
+    buyer !== null &&
+    seller !== null
+  );
+  check(
+    checks,
+    "directory.deal.shape",
+    "Directory deal carries dealKind, version, jobId, and externally-known buyer/seller owners",
+    shapeOk ? "pass" : "fail",
+    undefined,
+    jobId ?? "missing jobId",
+  );
+  check(
+    checks,
+    "directory.deal.no-fetch",
+    "Directory deal inspection uses supplied bundle bytes only",
+    "pass",
+    "§10.4.3",
+    "no network fetch",
+  );
+
+  if (input.expectations?.jobId !== undefined) {
+    check(
+      checks,
+      "directory.deal.job-id",
+      "Directory deal jobId matches the expected jobId",
+      jobId === input.expectations.jobId ? "pass" : "fail",
+      "§10.4.3",
+      jobId ?? "missing",
+    );
+  }
+
+  if (!shapeOk || jobId === null || buyer === null || seller === null) {
+    return {
+      inspectorVersion: "0.1.0",
+      generatedAt: generatedAt(),
+      input: {
+        artifactType: input.artifactType,
+        source: input.source,
+        inputHash,
+        artifactHash,
+      },
+      result: {
+        status: "rejected",
+        reason: "directory deal envelope is malformed",
+      },
+      checks,
+      limitations: LIMITATIONS,
+      provenance: { repo: "mj-deving/dacs-verify" },
+    };
+  }
+
+  const publicKeys = input.publicKeys ?? {};
+  const resolveKey: BundleKeyResolver = (claim) => resolveClaimPublicKey(claim, publicKeys);
+  const fetch = (storAddress: string): AttestationBundle | null => {
+    if (buyerBundle !== null && storAddress === bundleAddress(jobId, "buyer")) return buyerBundle;
+    if (sellerBundle !== null && storAddress === bundleAddress(jobId, "seller")) return sellerBundle;
+    return null;
+  };
+  const consumed = consumeBundles(jobId, fetch, resolveKey, { buyer, seller });
+  check(
+    checks,
+    "directory.deal.consume",
+    "DACS-5 consumer classifies the supplied buyer/seller bundle bytes",
+    "pass",
+    "§10.4.3",
+    consumed.verdict,
+  );
+
+  if (input.expectations?.expectedVerdict !== undefined) {
+    check(
+      checks,
+      "directory.deal.expected-verdict",
+      "DACS-5 consumer verdict matches caller expectation",
+      consumed.verdict === input.expectations.expectedVerdict ? "pass" : "fail",
+      "§10.4.3",
+      input.expectations.expectedVerdict,
+    );
+  }
+
+  const consumedBundles = [
+    consumed.buyer?.bundle,
+    consumed.seller?.bundle,
+  ].filter((bundle): bundle is AttestationBundle => bundle !== undefined);
+  const windowStart = consumedBundles.length === 0 ? 0 : Math.min(...consumedBundles.map((bundle) => bundle.finalisedAt));
+  const windowEnd = consumedBundles.length === 0 ? 0 : Math.max(...consumedBundles.map((bundle) => bundle.finalisedAt));
+  const computedAt = windowEnd;
+  const buyerReputation = deriveReputation(buyer, (candidateJobId) => candidateJobId === jobId ? "buyer" : undefined, consumedBundles, windowStart, windowEnd, computedAt);
+  const sellerReputation = deriveReputation(seller, (candidateJobId) => candidateJobId === jobId ? "seller" : undefined, consumedBundles, windowStart, windowEnd, computedAt);
+  const reputation = {
+    buyer: {
+      bundleCount: buyerReputation.bundleCount,
+      completionRate: buyerReputation.metrics.completionRate,
+      counterpartyAdjustedCompletionRate: buyerReputation.metrics.counterpartyAdjustedCompletionRate,
+    },
+    seller: {
+      bundleCount: sellerReputation.bundleCount,
+      completionRate: sellerReputation.metrics.completionRate,
+      counterpartyAdjustedCompletionRate: sellerReputation.metrics.counterpartyAdjustedCompletionRate,
+    },
+  };
+  check(
+    checks,
+    "directory.deal.reputation-consequence",
+    "Strict reputation is derived only from consumed verified bundle copies",
+    "pass",
+    "§10.5.1",
+    `buyer=${reputation.buyer.bundleCount} seller=${reputation.seller.bundleCount}`,
+  );
+
+  const expectationFailed = checks.some((entry) => entry.id.startsWith("directory.deal.expected") && entry.status === "fail");
+  const failed = checks.some((entry) => entry.status === "fail" || entry.status === "error");
+  const status: EvidenceInspectionStatus = expectationFailed || failed
+    ? "rejected"
+    : consumed.verdict === "unified"
+      ? "verified"
+      : "rejected";
+  const reason = expectationFailed
+    ? "directory deal result did not match one or more caller expectations"
+    : consumed.verdict === "unified"
+      ? "directory deal verified as unified DACS-5 evidence"
+      : `directory deal classified as ${consumed.verdict}; not unified strict evidence`;
+
+  return {
+    inspectorVersion: "0.1.0",
+    generatedAt: generatedAt(),
+    input: {
+      artifactType: input.artifactType,
+      source: input.source,
+      inputHash,
+      artifactHash,
+    },
+    result: {
+      status,
+      verdict: consumed.verdict,
+      reputation,
+      reason,
+    },
+    checks,
+    limitations: LIMITATIONS,
+    provenance: { repo: "mj-deving/dacs-verify" },
+  };
+}
+
 function inspectBundle(input: EvidenceInspectionInput, checks: EvidenceInspectionCheck[]): EvidenceInspectionResult {
   const bundle = input.artifact as AttestationBundle;
   const inputHash = safeInputHash(input);
@@ -684,9 +872,7 @@ function inspectBundle(input: EvidenceInspectionInput, checks: EvidenceInspectio
 
   const publicKeys = input.publicKeys ?? {};
   const decision = verifyBundle(bundle, (claim) => {
-    const explicit = publicKeys[claim];
-    if (explicit !== undefined) return decodePublicKey(explicit) ?? new Uint8Array([0]);
-    return keyFromClaim(claim);
+    return resolveClaimPublicKey(claim, publicKeys);
   });
   const verifyStatus: EvidenceCheckStatus = decision === "pass" ? "pass" : decision;
   check(checks, "bundle.verify", "Bundle verifies with the supplied or claim-derived Ed25519 keys", verifyStatus, "§10.4/§10.4.1", decision);

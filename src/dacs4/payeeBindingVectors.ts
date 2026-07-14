@@ -34,6 +34,7 @@ const DEM_RAIL = "demos-native:DEM";
 const X402_RAIL = "pay-x402:base:USDC";
 const GOOD_EVM_PAYEE = "0x1111111111111111111111111111111111111111";
 const OTHER_EVM_PAYEE = "0x2222222222222222222222222222222222222222";
+const UNBOUND_PAYEE_CLAIM = "cci-lei:984500PBUNBOUND001";
 const DEM_PAYEE = "0x1111111111111111111111111111111111111111111111111111111111111111";
 const BUNDLE_NO_STRONGER_TIER = `sha256:${sha256Hex("payee-bundle-no-stronger-tier")}`;
 const BUNDLE_CONTROLLED_EVM = `sha256:${sha256Hex("payee-bundle-controlled-evm")}`;
@@ -327,7 +328,7 @@ export function buildPayeeBindingVectorSet() {
       { railId: EVM_RAIL, phaseIndex: 99, payeeAddress: GOOD_EVM_PAYEE },
     ]), phaseInput(), { tier3AgreementAssertionPresent: true }),
     repeatedPayVector(),
-    gateVector("pb2-no-satisfiable-tier-refuses", "PB-2/PB-3", "No intrinsic binding, controlled linked claim, or tier-3 payee co-signature assertion is satisfiable, so the payer refuses before payment.", payeeBound, phaseInput(), {
+    gateVector("pb2-no-satisfiable-tier-refuses", "PB-2/PB-3", "The phase payee claim is not one of the agreement co-signers and has no intrinsic or controlled linked binding, so no PB tier is satisfiable and the payer refuses before payment.", payeeBound, phaseInput(GOOD_EVM_PAYEE, EVM_RAIL, 2, UNBOUND_PAYEE_CLAIM), {
       tier1Intrinsic: false,
       tier3AgreementAssertionPresent: false,
     }),

@@ -121,6 +121,11 @@ export const FIXTURE_KEYS = {
   },
 } as const;
 
+function fixtureKeyForParty(party: AgreementParty): typeof FIXTURE_KEYS[keyof typeof FIXTURE_KEYS] {
+  if (party.primaryClaim.startsWith("cci-xm:demos:")) return FIXTURE_KEYS.orchestrator;
+  return FIXTURE_KEYS[party.role];
+}
+
 export function artifactHash(artifact: AgreementArtifact): string {
   return sha256Hex(canonicalize(withoutSignature(artifact, "signatures")));
 }
@@ -129,7 +134,7 @@ export function signAgreement(artifact: Omit<AgreementArtifact, "signatures">, d
   const hash = sha256Hex(canonicalize(artifact));
   const signedBytes = buildSignedBytes(domain, hash);
   const signatures = artifact.parties.map((party) => {
-    const key = FIXTURE_KEYS[party.role];
+    const key = fixtureKeyForParty(party);
     const privateKey = createPrivateKey({ key: key.privateJwk, format: "jwk" });
     return {
       party: party.primaryClaim,
@@ -143,7 +148,7 @@ export function signAgreement(artifact: Omit<AgreementArtifact, "signatures">, d
 function keyForSignature(artifact: AgreementArtifact, signature: AgreementSignature): string | undefined {
   const party = artifact.parties.find((candidate) => candidate.primaryClaim === signature.party);
   if (party === undefined || signature.algorithm !== "ed25519") return undefined;
-  return FIXTURE_KEYS[party.role]?.publicJwk.x;
+  return fixtureKeyForParty(party).publicJwk.x;
 }
 
 export function verifyAgreementArtifact(
@@ -295,12 +300,16 @@ function validatePayoutCoverage(artifact: AgreementArtifact, listing: ListingFix
   }
 
   const expectedKeys = new Set(expected.map((p) => `${p.railId}:${p.phaseIndex}`));
+  const expectedRailByPhase = new Map(expected.map((p) => [p.phaseIndex, p.railId]));
   const seen = new Set<string>();
   for (const binding of bindings) {
     const key = `${binding.railId}:${binding.phaseIndex}`;
     if (seen.has(key)) return rejectArtifact("terms.payoutBindings", "permanent", "duplicate payout binding key");
     seen.add(key);
-    if (!expectedKeys.has(key)) return rejectArtifact("terms.payoutBindings", "permanent", "wrong railId/phaseIndex or extra payout binding");
+    if (!expectedKeys.has(key)) {
+      const expectedRail = expectedRailByPhase.get(binding.phaseIndex);
+      return rejectArtifact("terms.payoutBindings", "permanent", expectedRail === undefined ? "payout binding targets a non-pay phase" : "payout binding railId does not match the pay phase");
+    }
     if (typeof binding.payeeAddress !== "string" || binding.payeeAddress.length === 0) {
       return rejectArtifact("terms.payoutBindings.payeeAddress", "permanent", "payout binding payeeAddress must be non-empty");
     }

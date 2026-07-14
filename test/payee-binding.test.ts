@@ -13,6 +13,7 @@ test("PB vector set covers artifact compatibility and payee binding gates", () =
   expect(set.vectors.length).toBeGreaterThanOrEqual(20);
   expect(set.vectors.map((v) => v.name)).toContain("agreement-legacy-reader-refuses-payee-bound");
   expect(set.vectors.map((v) => v.name)).toContain("agreement-legacy-reader-refuses-both-discriminators");
+  expect(set.vectors.map((v) => v.name)).toContain("agreement-legacy-reader-refuses-neither-discriminator");
   expect(set.vectors.map((v) => v.name)).toContain("agreement-commit-agreement-with-payee-bound-rejects");
   expect(set.vectors.map((v) => v.name)).toContain("agreement-legacy-signature-domain-rejects-payee-bound");
   expect(set.vectors.map((v) => v.name)).toContain("pb1-missing-payoutbinding-permanent");
@@ -25,6 +26,7 @@ test("PB vector set covers artifact compatibility and payee binding gates", () =
 test("PB vector agreement signatures are self-contained with public keys", () => {
   const set = buildPayeeBindingVectorSet();
   expect(Object.keys(set.publicKeys).length).toBeGreaterThanOrEqual(3);
+  expect(new Set(Object.values(set.publicKeys)).size).toBe(Object.values(set.publicKeys).length);
 
   for (const vector of set.vectors) {
     const agreement = vector.agreement as
@@ -48,6 +50,23 @@ test("PB vector agreement signatures are self-contained with public keys", () =>
     }).ok);
     const failedAt = (vector.want as { failedAt?: string }).failedAt;
     expect(signatureResults.every(Boolean)).toBe(failedAt !== "signatures");
+  }
+});
+
+test("PB phase payee bundle hashes match the agreement party they claim", () => {
+  const set = buildPayeeBindingVectorSet();
+  for (const vector of set.vectors) {
+    const agreement = vector.agreement as { parties?: { primaryClaim?: string; bundleHash?: string }[] } | undefined;
+    const bundleByClaim = new Map((agreement?.parties ?? []).map((party) => [party.primaryClaim, party.bundleHash]));
+    const phaseInputs = [
+      ...((vector.phaseInputs as { payee?: { primaryClaim?: string; bundleHash?: string } }[] | undefined) ?? []),
+      ...((vector.phaseInput as { payee?: { primaryClaim?: string; bundleHash?: string } } | undefined) ? [vector.phaseInput as { payee?: { primaryClaim?: string; bundleHash?: string } }] : []),
+    ];
+    for (const phaseInput of phaseInputs) {
+      const claim = phaseInput.payee?.primaryClaim;
+      if (claim === undefined || !bundleByClaim.has(claim)) continue;
+      expect(phaseInput.payee?.bundleHash).toBe(bundleByClaim.get(claim));
+    }
   }
 });
 

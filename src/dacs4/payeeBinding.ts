@@ -197,10 +197,12 @@ export function verifyAgreementArtifact(
     }
   }
 
-  if (hasPayeeBound) {
-    const coverage = validatePayoutCoverage(artifact, listing);
-    if (!coverage.ok) return { ...coverage, artifactHash: hash, signatureDomain: domain };
+  if (!hasPayeeBound) {
+    return { expected: "pass", ok: true, artifactHash: hash, signatureDomain: domain, reason: "legacy AgreementDocument schema and signatures verified; PB payout coverage is not applicable" };
   }
+
+  const coverage = validatePayoutCoverage(artifact, listing);
+  if (!coverage.ok) return { ...coverage, artifactHash: hash, signatureDomain: domain };
 
   return { expected: "pass", ok: true, artifactHash: hash, signatureDomain: domain, reason: "artifact schema, commit phase, signatures, and payout coverage verified" };
 }

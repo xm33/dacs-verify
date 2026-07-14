@@ -104,6 +104,7 @@ function baseArtifact(
   bindings = [{ railId: EVM_RAIL, phaseIndex: 2, payeeAddress: GOOD_EVM_PAYEE }],
   forListing: ListingFixture = listing,
   artifactParties = parties,
+  termsRail = EVM_RAIL,
 ): AgreementArtifact {
   const artifact = {
     ...(version === "legacy" ? { agreementVersion: "1" as const } : { payeeBoundAgreementVersion: "1" as const }),
@@ -113,7 +114,7 @@ function baseArtifact(
     derivedFromPattern: "fixed-price" as const,
     terms: {
       price: { amount: "10", currency: "USDC" },
-      rail: EVM_RAIL,
+      rail: termsRail,
       deliverable,
       deadline: GENERATED_AT + 3_600_000,
       ...(version === "payee-bound" ? { payoutBindings: bindings } : {}),
@@ -283,7 +284,7 @@ export function buildPayeeBindingVectorSet() {
       controlledLinkedClaim: `cci-xm:evm:8453:${GOOD_EVM_PAYEE}`,
       verifyResult: { decision: "pass", reason: "controlled-linked-claim-resolved" },
     }),
-    gateVector("pb2-tier1-pay-dem-intrinsic-matches", "PB-2", "For pay-dem, the destination is definitionally the primary claim's Demos address and binds at tier 1.", baseArtifact("payee-bound", [{ railId: DEM_RAIL, phaseIndex: 2, payeeAddress: DEM_PAYEE }], { ...listing, pipeline: [{ kind: "negotiate-fixed-price" }, { kind: "commit-payee-bound-agreement" }, { kind: "pay-dem", parameters: { rail: DEM_RAIL } }] }, demosParties), phaseInput(DEM_PAYEE, DEM_RAIL, 2, `cci-xm:demos:testnet:${DEM_PAYEE}`), {
+    gateVector("pb2-tier1-pay-dem-intrinsic-matches", "PB-2", "For pay-dem, the destination is definitionally the primary claim's Demos address and binds at tier 1.", baseArtifact("payee-bound", [{ railId: DEM_RAIL, phaseIndex: 2, payeeAddress: DEM_PAYEE }], { ...listing, pipeline: [{ kind: "negotiate-fixed-price" }, { kind: "commit-payee-bound-agreement" }, { kind: "pay-dem", parameters: { rail: DEM_RAIL } }] }, demosParties, DEM_RAIL), phaseInput(DEM_PAYEE, DEM_RAIL, 2, `cci-xm:demos:testnet:${DEM_PAYEE}`), {
       strongestApplicableTier: 1,
       tier1Intrinsic: true,
     }, { ...listing, pipeline: [{ kind: "negotiate-fixed-price" }, { kind: "commit-payee-bound-agreement" }, { kind: "pay-dem", parameters: { rail: DEM_RAIL } }] }),

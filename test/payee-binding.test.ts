@@ -30,4 +30,8 @@ test("artifact-shape failures classify as permanent and tier-2 unresolved stays 
   expect(unresolved?.expected).toBe("indeterminate");
   expect((unresolved?.want as { maySubmitPayment?: boolean }).maySubmitPayment).toBe(false);
   expect((unresolved?.want as { recordedVerifyResultEquals?: { reason?: string } }).recordedVerifyResultEquals?.reason).toBe("linked-claim-anchor-unavailable");
+
+  const sb3 = set.vectors.find((v) => v.name === "pb3-sb3-absent-fallback-not-imported");
+  expect(sb3?.expected).toBe("indeterminate");
+  expect((sb3?.want as { maySubmitPayment?: boolean }).maySubmitPayment).toBe(false);
 });

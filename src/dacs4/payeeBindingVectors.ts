@@ -274,8 +274,11 @@ export function buildPayeeBindingVectorSet() {
       verifyResult: { decision: "error", reason: "resolver-malformed-response" },
       tier3AgreementAssertionPresent: true,
     }),
-    gateVector("pb3-sb3-absent-fallback-not-imported", "PB-3", "SB-3 fallback semantics are settlement-evidence semantics and cannot satisfy the irreversible pre-pay PB gate.", payeeBound, phaseInput(), {
-      tier3AgreementAssertionPresent: false,
+    gateVector("pb3-sb3-absent-fallback-not-imported", "PB-3", "SB-3 fallback semantics are settlement-evidence semantics and cannot downgrade an applicable-but-unresolvable tier-2 pre-pay gate.", payeeBound, phaseInput(), {
+      strongestApplicableTier: 2,
+      controlledLinkedClaim: `cci-xm:evm:8453:${GOOD_EVM_PAYEE}`,
+      verifyResult: { decision: "indeterminate", reason: "linked-claim-anchor-unavailable" },
+      tier3AgreementAssertionPresent: true,
       sb3FallbackAvailable: true,
     }),
   ];

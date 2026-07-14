@@ -78,11 +78,24 @@ const listing: ListingFixture = {
 
 const legacyListing: ListingFixture = {
   ...listing,
+  listingId: "did:demos:agent:pb-fixture/payee-binding-legacy/1",
+  contentHash: sha256Hex("pb-listing-legacy"),
   pipeline: [
     { kind: "negotiate-fixed-price" },
     { kind: "commit-agreement" },
     { kind: "pay-evm-erc20", parameters: { rail: EVM_RAIL } },
     { kind: "deliver-storage-program" },
+  ],
+};
+
+const demosListing: ListingFixture = {
+  ...listing,
+  listingId: "did:demos:agent:pb-fixture/payee-binding-dem/1",
+  contentHash: sha256Hex("pb-listing-dem"),
+  pipeline: [
+    { kind: "negotiate-fixed-price" },
+    { kind: "commit-payee-bound-agreement" },
+    { kind: "pay-dem", parameters: { rail: DEM_RAIL } },
   ],
 };
 
@@ -287,10 +300,10 @@ export function buildPayeeBindingVectorSet() {
       controlledLinkedClaim: `cci-xm:evm:8453:${GOOD_EVM_PAYEE}`,
       verifyResult: { decision: "pass", reason: "controlled-linked-claim-resolved" },
     }),
-    gateVector("pb2-tier1-pay-dem-intrinsic-matches", "PB-2", "For pay-dem, the destination is definitionally the primary claim's Demos address and binds at tier 1.", baseArtifact("payee-bound", [{ railId: DEM_RAIL, phaseIndex: 2, payeeAddress: DEM_PAYEE }], { ...listing, pipeline: [{ kind: "negotiate-fixed-price" }, { kind: "commit-payee-bound-agreement" }, { kind: "pay-dem", parameters: { rail: DEM_RAIL } }] }, demosParties, DEM_RAIL, "DEM"), phaseInput(DEM_PAYEE, DEM_RAIL, 2, `cci-xm:demos:testnet:${DEM_PAYEE}`), {
+    gateVector("pb2-tier1-pay-dem-intrinsic-matches", "PB-2", "For pay-dem, the destination is definitionally the primary claim's Demos address and binds at tier 1.", baseArtifact("payee-bound", [{ railId: DEM_RAIL, phaseIndex: 2, payeeAddress: DEM_PAYEE }], demosListing, demosParties, DEM_RAIL, "DEM"), phaseInput(DEM_PAYEE, DEM_RAIL, 2, `cci-xm:demos:testnet:${DEM_PAYEE}`), {
       strongestApplicableTier: 1,
       tier1Intrinsic: true,
-    }, { ...listing, pipeline: [{ kind: "negotiate-fixed-price" }, { kind: "commit-payee-bound-agreement" }, { kind: "pay-dem", parameters: { rail: DEM_RAIL } }] }),
+    }, demosListing),
     gateVector("pb2-tier2-applicable-unresolvable-pauses-no-tier3", "PB-2/PB-3", "Tier 2 is applicable but cannot resolve; the payer pauses with the VerifyResult and does not downgrade to tier 3.", payeeBound, phaseInput(), {
       strongestApplicableTier: 2,
       controlledLinkedClaim: `cci-xm:evm:8453:${GOOD_EVM_PAYEE}`,

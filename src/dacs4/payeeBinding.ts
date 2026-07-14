@@ -86,6 +86,7 @@ export type GateResult = {
   boundDestination?: string;
   sessionTransition?: "paused";
   recordedVerifyResultEquals?: BindingContext["verifyResult"];
+  mustNotUseTier3?: boolean;
   mustNotApplySb3Fallback?: boolean;
   reason: string;
 };
@@ -250,7 +251,7 @@ export function evaluatePrePayGate(artifact: AgreementArtifact, listing: Listing
   if (bindingContext.strongestApplicableTier === 2 || bindingContext.controlledLinkedClaim !== undefined || bindingContext.verifyResult !== undefined) {
     const verifyResult = bindingContext.verifyResult;
     if (verifyResult?.decision === "error") {
-      return { expected: "error", maySubmitPayment: false, ok: false, errorClass: "permanent", failedAt: "payee.primaryClaim.binding", reason: verifyResult.reason, recordedVerifyResultEquals: verifyResult };
+      return { expected: "error", maySubmitPayment: false, ok: false, errorClass: "permanent", failedAt: "payee.primaryClaim.binding", reason: verifyResult.reason, recordedVerifyResultEquals: verifyResult, mustNotUseTier3: true };
     }
     if (verifyResult?.decision === "indeterminate") {
       return {
@@ -262,6 +263,7 @@ export function evaluatePrePayGate(artifact: AgreementArtifact, listing: Listing
         failedAt: "payee.primaryClaim.binding",
         reason: verifyResult.reason,
         recordedVerifyResultEquals: verifyResult,
+        mustNotUseTier3: true,
         ...(bindingContext.sb3FallbackAvailable ? { mustNotApplySb3Fallback: true } : {}),
       };
     }

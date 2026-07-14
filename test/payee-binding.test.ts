@@ -49,6 +49,20 @@ test("PB vector agreement signatures are self-contained with public keys", () =>
   }
 });
 
+test("PB vector LEI fixture claims use 20-character identifiers", () => {
+  const set = buildPayeeBindingVectorSet();
+  const claims = new Set<string>();
+  for (const vector of set.vectors) {
+    const agreement = vector.agreement as { parties?: { primaryClaim?: string }[] } | undefined;
+    for (const party of agreement?.parties ?? []) if (party.primaryClaim?.startsWith("cci-lei:")) claims.add(party.primaryClaim);
+    const phaseInput = vector.phaseInput as { payee?: { primaryClaim?: string } } | undefined;
+    if (phaseInput?.payee?.primaryClaim?.startsWith("cci-lei:")) claims.add(phaseInput.payee.primaryClaim);
+  }
+  for (const claim of claims) {
+    expect(claim.slice("cci-lei:".length)).toMatch(/^[A-Z0-9]{20}$/);
+  }
+});
+
 test("artifact-shape failures classify as permanent and tier-2 unresolved stays non-payment", () => {
   const set = buildPayeeBindingVectorSet();
   const missing = set.vectors.find((v) => v.name === "pb1-missing-payoutbinding-permanent");
@@ -58,6 +72,7 @@ test("artifact-shape failures classify as permanent and tier-2 unresolved stays 
   const unresolved = set.vectors.find((v) => v.name === "pb2-tier2-applicable-unresolvable-pauses-no-tier3");
   expect(unresolved?.expected).toBe("indeterminate");
   expect((unresolved?.want as { maySubmitPayment?: boolean }).maySubmitPayment).toBe(false);
+  expect((unresolved?.want as { mustNotUseTier3?: boolean }).mustNotUseTier3).toBe(true);
   expect((unresolved?.want as { recordedVerifyResultEquals?: { reason?: string } }).recordedVerifyResultEquals?.reason).toBe("linked-claim-anchor-unavailable");
 
   const sb3 = set.vectors.find((v) => v.name === "pb3-sb3-absent-fallback-not-imported");

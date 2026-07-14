@@ -29,7 +29,7 @@ export type PayoutBinding = {
 
 export type AgreementTerms = {
   price: { amount: string; currency: string };
-  rail?: string;
+  rail?: { railId: string };
   deliverable: { deliverableType: string; hash: string };
   deadline: number;
   payoutBindings?: PayoutBinding[];

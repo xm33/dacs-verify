@@ -151,7 +151,7 @@ function baseArtifact(
     derivedFromPattern: "fixed-price" as const,
     terms: {
       price: { amount: "10", currency: termsCurrency },
-      rail: termsRail,
+      rail: { railId: termsRail },
       deliverable,
       deadline: GENERATED_AT + 3_600_000,
       ...(version === "payee-bound" ? { payoutBindings: bindings } : {}),
@@ -298,7 +298,7 @@ export function buildPayeeBindingVectorSet() {
     terms: strippedTerms,
     signatures: payeeBound.signatures,
   };
-  const x402PayeeBound = baseArtifact("payee-bound", [{ railId: X402_RAIL, phaseIndex: 2, payeeAddress: GOOD_EVM_PAYEE }], x402Listing);
+  const x402PayeeBound = baseArtifact("payee-bound", [{ railId: X402_RAIL, phaseIndex: 2, payeeAddress: GOOD_EVM_PAYEE }], x402Listing, parties, X402_RAIL);
 
   const vectors: Vector[] = [
     artifactVector("agreement-legacy-reader-accepts-legacy", "§8.5 compatibility", "A legacy reader accepts a valid AgreementDocument and applies no PB claim.", legacy, legacyListing, "commit-agreement", "legacy"),

@@ -307,7 +307,7 @@ function passGate(bindingTier: 1 | 2 | 3, boundDestination: string, reason: stri
 }
 
 export function hashSecurityVectors(vectors: unknown[]): string {
-  return sha256Hex(JSON.stringify(vectors));
+  return sha256Hex(canonicalize(vectors));
 }
 
 export function assertFixtureHash(hash: string): void {

@@ -255,6 +255,11 @@ export function buildPayeeBindingVectorSet() {
   const both = signAgreement({ ...unsigned(payeeBound), agreementVersion: "1" }, "dacs-payee-bound-agreement:v1:");
   const { payeeBoundAgreementVersion: _neitherVersion, ...neitherRest } = unsigned(payeeBound);
   const neither = signAgreement(neitherRest, "dacs-payee-bound-agreement:v1:");
+  const { payoutBindings: _omittedPayoutBindings, ...omittedPayoutTerms } = payeeBound.terms;
+  const omittedPayoutBindings = signAgreement({
+    ...unsigned(payeeBound),
+    terms: omittedPayoutTerms,
+  }, "dacs-payee-bound-agreement:v1:");
   const { payoutBindings: _payoutBindings, ...strippedTerms } = payeeBound.terms;
   const { payeeBoundAgreementVersion: _strippedVersion, ...strippedRest } = unsigned(payeeBound);
   const stripped = signAgreement({
@@ -270,6 +275,7 @@ export function buildPayeeBindingVectorSet() {
     artifactVector("agreement-current-reader-accepts-payee-bound", "§8.5 compatibility", "A current reader accepts PayeeBoundAgreementDocument when the artifact, phase, signatures, and payout coverage are coherent.", payeeBound, listing, "commit-payee-bound-agreement", "current"),
     artifactVector("agreement-both-discriminators-reject", "§8.5 compatibility", "An artifact carrying both agreementVersion and payeeBoundAgreementVersion rejects at the discriminator gate.", both, listing, "commit-payee-bound-agreement", "current"),
     artifactVector("agreement-neither-discriminator-reject", "§8.5 compatibility", "An artifact carrying neither version discriminator rejects at the discriminator gate.", neither, listing, "commit-payee-bound-agreement", "current"),
+    artifactVector("agreement-payee-bound-omitted-payoutbindings-reject", "§8.5 compatibility", "A PayeeBoundAgreementDocument omitting the required terms.payoutBindings field rejects before any pay handler.", omittedPayoutBindings, listing, "commit-payee-bound-agreement", "current"),
     artifactVector("agreement-commit-agreement-with-payee-bound-rejects", "CA-5", "commit-agreement MUST NOT coerce a PayeeBoundAgreementDocument into the legacy type.", payeeBoundOnLegacyCommit, legacyListing, "commit-agreement", "current"),
     artifactVector("agreement-commit-payee-bound-with-legacy-rejects", "CA-5", "commit-payee-bound-agreement MUST NOT coerce a legacy AgreementDocument into the payee-bound type.", legacyOnPayeeBoundCommit, listing, "commit-payee-bound-agreement", "current"),
     domainVector("agreement-legacy-signature-domain-rejects-payee-bound", "SIG-2", "A PayeeBoundAgreementDocument signature does not verify under dacs-agreement:v1:.", payeeBound, "dacs-agreement:v1:"),

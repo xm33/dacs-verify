@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { DOMAIN_SEPARATOR_REGISTRY, isRegisteredSeparator } from "../src/signing.ts";
+import { DOMAIN_SEPARATOR_REGISTRY, isRegisteredSeparator, verifyArtifactSignatureWithSeparator } from "../src/signing.ts";
 import { buildPayeeBindingVectorSet } from "../src/dacs4/payeeBindingVectors.ts";
 
 test("§7.7 registry includes PayeeBoundAgreementDocument", () => {
@@ -18,6 +18,34 @@ test("PB vector set covers artifact compatibility and payee binding gates", () =
   expect(set.vectors.map((v) => v.name)).toContain("pb1-duplicate-payoutbinding-permanent");
   expect(set.vectors.map((v) => v.name)).toContain("pb1-wrong-rail-payoutbinding-permanent");
   expect(set.vectors.map((v) => v.name)).toContain("pb1-extra-payoutbinding-permanent");
+});
+
+test("PB vector agreement signatures are self-contained with public keys", () => {
+  const set = buildPayeeBindingVectorSet();
+  expect(Object.keys(set.publicKeys).length).toBeGreaterThanOrEqual(3);
+
+  for (const vector of set.vectors) {
+    const agreement = vector.agreement as
+      | { signatures?: { party: string; value: string }[] }
+      | undefined;
+    if (!Array.isArray(agreement?.signatures)) continue;
+
+    for (const signature of agreement.signatures) {
+      expect(set.publicKeys[signature.party]).toBeString();
+    }
+
+    if (typeof vector.signatureDomain !== "string") continue;
+
+    const signatureResults = agreement.signatures.map((signature) => verifyArtifactSignatureWithSeparator({
+      separator: vector.signatureDomain as "dacs-agreement:v1:" | "dacs-payee-bound-agreement:v1:",
+      doc: agreement,
+      publicKeyRaw: Buffer.from(set.publicKeys[signature.party]!, "base64url"),
+      signatureRaw: Buffer.from(signature.value, "base64"),
+      signatureFields: ["signatures"],
+    }).ok);
+    const failedAt = (vector.want as { failedAt?: string }).failedAt;
+    expect(signatureResults.every(Boolean)).toBe(failedAt !== "signatures");
+  }
 });
 
 test("artifact-shape failures classify as permanent and tier-2 unresolved stays non-payment", () => {

@@ -4,6 +4,7 @@ import { canonicalize } from "../canonicalize.ts";
 import { sha256Hex } from "../hash.ts";
 import {
   evaluatePrePayGate,
+  FIXTURE_KEYS,
   hashSecurityVectors,
   signAgreement,
   verifyAgreementArtifact,
@@ -58,6 +59,12 @@ const demosParties: AgreementParty[] = [
     vetRecordRef: { kind: "dacs-2-composite", id: "vet-seller-demos", contentHash: sha256Hex("vet-seller-demos") },
   },
 ];
+
+const publicKeys: Record<string, string> = Object.fromEntries([
+  [parties[0]!.primaryClaim, FIXTURE_KEYS.buyer.publicJwk.x],
+  [parties[1]!.primaryClaim, FIXTURE_KEYS.seller.publicJwk.x],
+  [demosParties[1]!.primaryClaim, FIXTURE_KEYS.seller.publicJwk.x],
+]);
 
 const deliverable = {
   deliverableType: "storage-program",
@@ -344,6 +351,7 @@ export function buildPayeeBindingVectorSet() {
       "#236 PayeeBoundAgreementDocument redesign compatibility matrix",
     ],
     decisionModel: "artifact gate plus pre-pay destination gate. Artifact failures are permanent pre-Settle failures; PB destination mismatch is counterparty; applicable-but-unresolvable tier 2 pauses as substrate; resolver errors remain error; valid legacy AgreementDocument carries no PB claim.",
+    publicKeys,
     hash: hashSecurityVectors(vectors),
     count: vectors.length,
     vectors,

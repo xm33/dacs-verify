@@ -1,4 +1,5 @@
 import { writeFileSync } from "node:fs";
+import { execSync } from "node:child_process";
 import { canonicalize } from "../canonicalize.ts";
 import { sha256Hex } from "../hash.ts";
 import {
@@ -282,6 +283,11 @@ export function buildPayeeBindingVectorSet() {
   return {
     set: "payee-destination-binding-v0.1",
     spec: "DACS-3 §8.5/§8.6 PayeeBoundAgreementDocument compatibility; DACS-4 §9.5.1 PB-1..PB-3",
+    provenance: {
+      generator: "github.com/mj-deving/dacs-verify",
+      command: "bun scripts/emit-payee-binding-vectors.ts",
+      commit: currentCommit(),
+    },
     gaps: [
       "#231 PB conformance row and vectors",
       "#236 PayeeBoundAgreementDocument redesign compatibility matrix",
@@ -291,6 +297,14 @@ export function buildPayeeBindingVectorSet() {
     count: vectors.length,
     vectors,
   };
+}
+
+function currentCommit(): string {
+  try {
+    return execSync("git rev-parse HEAD", { encoding: "utf8" }).trim();
+  } catch {
+    return "unknown";
+  }
 }
 
 export function emitPayeeBindingVectorSet(path?: string): void {

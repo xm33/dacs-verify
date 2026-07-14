@@ -311,7 +311,6 @@ export function buildPayeeBindingVectorSet() {
   const { payeeBoundAgreementVersion: _strippedVersion, ...strippedRest } = unsigned(payeeBound);
   const stripped: AgreementArtifact = {
     ...strippedRest,
-    listingRef: { listingId: legacyListing.listingId, version: legacyListing.version, contentHash: legacyListing.contentHash },
     agreementVersion: "1",
     terms: strippedTerms,
     signatures: payeeBound.signatures,
@@ -333,7 +332,7 @@ export function buildPayeeBindingVectorSet() {
     artifactVector("agreement-commit-payee-bound-with-legacy-rejects", "CA-5", "commit-payee-bound-agreement MUST NOT coerce a legacy AgreementDocument into the payee-bound type.", legacyOnPayeeBoundCommit, listing, "commit-payee-bound-agreement", "current"),
     domainVector("agreement-legacy-signature-domain-rejects-payee-bound", "SIG-2", "A PayeeBoundAgreementDocument signature does not verify under dacs-agreement:v1:.", payeeBound, "dacs-agreement:v1:"),
     domainVector("agreement-payee-bound-signature-domain-rejects-legacy", "SIG-2", "A legacy AgreementDocument signature does not verify under dacs-payee-bound-agreement:v1:.", legacy, "dacs-payee-bound-agreement:v1:"),
-    artifactVector("agreement-stripped-payee-bound-cannot-downgrade", "§8.5 compatibility", "Stripping payeeBoundAgreementVersion/payoutBindings from the original payee-bound artifact and retrying through the legacy commit path changes the signed scope and fails signature verification.", stripped, legacyListing, "commit-agreement", "current"),
+    artifactVector("agreement-stripped-payee-bound-cannot-downgrade", "§8.5 compatibility", "Stripping payeeBoundAgreementVersion/payoutBindings from the original payee-bound artifact and retrying through the legacy commit path changes the signed scope and fails signature verification.", stripped, listing, "commit-agreement", "current"),
 
     gateVector("pb1-agreement-bound-destination-matches", "PB-1/PB-2", "The phase tuple resolves to a signed payout binding and tier 3 is applicable, so the payer may submit.", payeeBound, phaseInput(), { strongestApplicableTier: 3, tier1Intrinsic: false, tier2Applicable: false, tier3AgreementAssertionPresent: true }),
     gateVector("pb1-destination-mismatch-aborts-before-pay", "PB-1", "The phase payeeAddress differs from the signed payout binding; the handler aborts before payment.", payeeBound, phaseInput(OTHER_EVM_PAYEE), { tier1Intrinsic: false, tier2Applicable: false, tier3AgreementAssertionPresent: true }),
@@ -369,7 +368,7 @@ export function buildPayeeBindingVectorSet() {
       strongestApplicableTier: 1,
       tier1Intrinsic: true,
       tier2Applicable: false,
-      tier3AgreementAssertionPresent: false,
+      tier3AgreementAssertionPresent: true,
     }, demosListing),
     gateVector("pb2-tier2-applicable-unresolvable-pauses-no-tier3", "PB-2/PB-3", "Tier 2 is applicable but cannot resolve; the payer pauses with the VerifyResult and does not downgrade to tier 3.", payeeBound, phaseInput(GOOD_EVM_PAYEE, EVM_RAIL, 2, "cci-lei:984500PBSELLER000010", SELLER_BUNDLE), {
       strongestApplicableTier: 2,

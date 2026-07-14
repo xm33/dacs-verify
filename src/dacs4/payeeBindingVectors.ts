@@ -328,7 +328,6 @@ export function buildPayeeBindingVectorSet() {
     ]), phaseInput(), { tier3AgreementAssertionPresent: true }),
     repeatedPayVector(),
     gateVector("pb2-no-satisfiable-tier-refuses", "PB-2/PB-3", "No intrinsic binding, controlled linked claim, or tier-3 payee co-signature assertion is satisfiable, so the payer refuses before payment.", payeeBound, phaseInput(), {
-      strongestApplicableTier: 3,
       tier1Intrinsic: false,
       tier3AgreementAssertionPresent: false,
     }),

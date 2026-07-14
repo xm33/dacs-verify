@@ -145,6 +145,49 @@ const directorySampleInput = (): EvidenceInspectionInput => {
   };
 };
 
+function directoryServiceProfile(maturity = "listed", sampleReceipt?: ReturnType<typeof makeDirectorySampleReceipt>) {
+  return {
+    profileKind: "directory-service-profile",
+    profileVersion: "0.1",
+    listing: {
+      listingId: "dep-upgrade-plan",
+      version: 1,
+      seller: directorySignerClaim,
+      artifactProfile: "fixture-listing",
+      contentHash: "3".repeat(64),
+    },
+    maturityProfile: {
+      maturity,
+      noReputationClaim: true,
+      noLivePaymentClaim: maturity !== "live-paid",
+    },
+    ...(sampleReceipt !== undefined ? { sampleReceipt } : {}),
+    limitations: [
+      "roster maturity hint",
+      "not reputation evidence",
+      "not source truth",
+    ],
+  };
+}
+
+const directoryServiceProfileInput = (maturity = "listed", sampleReceipt?: ReturnType<typeof makeDirectorySampleReceipt>): EvidenceInspectionInput => ({
+  artifactType: "directory-service-profile",
+  source: {
+    kind: "fixture",
+    label: "Directory service profile fixture",
+    url: "examples/inspect-directory-service-profile.ts",
+  },
+  artifact: directoryServiceProfile(maturity, sampleReceipt),
+  expectations: {
+    listingId: "dep-upgrade-plan",
+    listingVersion: 1,
+    expectedMaturity: maturity,
+  },
+  publicKeys: {
+    [directorySignerClaim]: Buffer.from(directorySigner.publicKeyRaw).toString("hex"),
+  },
+});
+
 test("Evidence Inspector verifies the DACS-VERIFY-0004 bundle fixture", () => {
   const result = inspectEvidence(baseInput());
   expect(result.result.status).toBe("verified");
@@ -386,4 +429,75 @@ test("Evidence Inspector returns indeterminate for a Directory sample receipt wi
   const result = inspectEvidence(input);
   expect(result.result.status).toBe("indeterminate");
   expect(result.checks.find((entry) => entry.id === "directory.receipt.signature")?.status).toBe("indeterminate");
+});
+
+test("Evidence Inspector verifies a listed Directory service profile", () => {
+  const result = inspectEvidence(directoryServiceProfileInput());
+  expect(result.result.status).toBe("verified");
+  expect(result.checks.find((entry) => entry.id === "directory.profile.listed-no-evidence-required")?.status).toBe("pass");
+});
+
+test("Evidence Inspector rejects a Directory service profile with a wrong expected listing version", () => {
+  const input = directoryServiceProfileInput();
+  input.expectations!.listingVersion = 2;
+  const result = inspectEvidence(input);
+  expect(result.result.status).toBe("rejected");
+  expect(result.checks.find((entry) => entry.id === "directory.profile.listing-version")?.status).toBe("fail");
+});
+
+test("Evidence Inspector rejects a Directory service profile with contradictory limitation flags", () => {
+  const input = directoryServiceProfileInput();
+  const profile = structuredClone(input.artifact) as ReturnType<typeof directoryServiceProfile>;
+  profile.maturityProfile.noReputationClaim = false;
+  profile.maturityProfile.noLivePaymentClaim = false;
+  input.artifact = profile;
+  const result = inspectEvidence(input);
+  expect(result.result.status).toBe("rejected");
+  expect(result.checks.find((entry) => entry.id === "directory.profile.limitation-flags")?.status).toBe("fail");
+});
+
+test("Evidence Inspector verifies a sample-backed Directory service profile with an embedded receipt", () => {
+  const result = inspectEvidence(directoryServiceProfileInput("sample-backed", makeDirectorySampleReceipt()));
+  expect(result.result.status).toBe("verified");
+  expect(result.checks.find((entry) => entry.id === "directory.profile.sample-receipt-verifies")?.status).toBe("pass");
+});
+
+test("Evidence Inspector rejects a Directory service profile with a wrong expected receipt hash", () => {
+  const input = directoryServiceProfileInput("sample-backed", makeDirectorySampleReceipt());
+  input.expectations!.expectedReceiptHash = "0".repeat(64);
+  const result = inspectEvidence(input);
+  expect(result.result.status).toBe("rejected");
+  expect(result.checks.find((entry) => entry.id === "directory.profile.sample-receipt-verifies")?.status).toBe("fail");
+});
+
+test("Evidence Inspector rejects a sample-backed Directory service profile without an embedded receipt", () => {
+  const result = inspectEvidence(directoryServiceProfileInput("sample-backed"));
+  expect(result.result.status).toBe("rejected");
+  expect(result.checks.find((entry) => entry.id === "directory.profile.sample-receipt-present")?.status).toBe("fail");
+});
+
+test("Evidence Inspector rejects a Directory service profile with a tampered sample receipt", () => {
+  const receipt = makeDirectorySampleReceipt();
+  receipt.workProduct.descriptor.changedFiles.push("src/hidden.ts");
+  const result = inspectEvidence(directoryServiceProfileInput("sample-backed", receipt));
+  expect(result.result.status).toBe("rejected");
+  expect(result.checks.find((entry) => entry.id === "directory.profile.sample-receipt-verifies")?.status).toBe("fail");
+});
+
+test("Evidence Inspector rejects a Directory service profile whose sample receipt targets another listing version", () => {
+  const input = directoryServiceProfileInput("sample-backed", makeDirectorySampleReceipt());
+  const profile = structuredClone(input.artifact) as ReturnType<typeof directoryServiceProfile>;
+  profile.listing.version = 2;
+  input.artifact = profile;
+  const result = inspectEvidence(input);
+  expect(result.result.status).toBe("rejected");
+  expect(result.checks.find((entry) => entry.id === "directory.profile.sample-listing-binding")?.status).toBe("fail");
+  expect(result.checks.find((entry) => entry.id === "directory.profile.sample-receipt-verifies")?.status).toBe("fail");
+});
+
+test("Evidence Inspector blocks future Directory service maturity without an adapter", () => {
+  const result = inspectEvidence(directoryServiceProfileInput("strict-bundle-history"));
+  expect(result.result.status).toBe("blocked");
+  expect(result.result.blockedReason).toBe("missing-verifier-adapter");
+  expect(result.checks.find((entry) => entry.id === "directory.profile.future-maturity-adapter")?.status).toBe("blocked");
 });

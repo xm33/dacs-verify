@@ -8,7 +8,10 @@ import {
   type BundleDecision,
 } from "./dacs5/index.ts";
 
-export type EvidenceArtifactType = "dacs-5-attestation-bundle" | "directory-sample-receipt";
+export type EvidenceArtifactType =
+  | "dacs-5-attestation-bundle"
+  | "directory-sample-receipt"
+  | "directory-service-profile";
 export type EvidenceInspectionStatus = "verified" | "rejected" | "indeterminate" | "error" | "blocked";
 export type EvidenceCheckStatus = "pass" | "fail" | "indeterminate" | "error" | "blocked";
 export type BlockedReason =
@@ -36,6 +39,7 @@ export interface EvidenceInspectionInput {
     expectedDecision?: BundleDecision;
     expectedBundleHash?: string;
     listingId?: string;
+    listingVersion?: number;
     expectedReceiptHash?: string;
     expectedMaturity?: string;
   };
@@ -87,6 +91,7 @@ const HASH_RE = /^[0-9a-f]{64}$/;
 const DACS_VERIFY_0004_BUNDLE_HASH = "9e5ea58d198b459a2929d38019807c465ce9988dcb89c847cce8e80210df39ba";
 const DACS_VERIFY_0004_FULL_ARTIFACT_HASH = "a9c81cb97ce5a4e4a80678086ac34cd43b688ff2d3c195178d973307d24af981";
 const DIRECTORY_SAMPLE_SEPARATOR = "dacs-x-directory-sample-receipt:v0.1:";
+const DIRECTORY_MATURITY = ["listed", "sample-backed", "callable", "strict-bundle-history", "live-paid"] as const;
 
 function safeInputHash(input: unknown): string {
   try {
@@ -215,11 +220,18 @@ export function inspectEvidence(input: EvidenceInspectionInput): EvidenceInspect
     }
     check(checks, "input.envelope.parse", "Input envelope includes an object artifact", "pass");
 
-    if (artifactType !== "dacs-5-attestation-bundle" && artifactType !== "directory-sample-receipt") {
+    if (
+      artifactType !== "dacs-5-attestation-bundle" &&
+      artifactType !== "directory-sample-receipt" &&
+      artifactType !== "directory-service-profile"
+    ) {
       check(checks, "input.artifact-type", "Artifact type is supported", "blocked", undefined, artifactType);
       return blocked(input, artifactType, source, "unsupported-artifact-type", `unsupported artifactType: ${artifactType}`, checks);
     }
 
+    if (artifactType === "directory-service-profile") {
+      return inspectDirectoryServiceProfile(input as EvidenceInspectionInput, checks);
+    }
     if (artifactType === "directory-sample-receipt") {
       return inspectDirectorySampleReceipt(input as EvidenceInspectionInput, checks);
     }
@@ -250,6 +262,210 @@ function directoryReceiptPayload(receipt: Record<string, unknown>): Record<strin
 function directoryReceiptHashScope(receipt: Record<string, unknown>): Record<string, unknown> {
   const { receiptHash: _receiptHash, ...scope } = receipt;
   return scope;
+}
+
+function nestedStatusToCheckStatus(status: EvidenceInspectionStatus): EvidenceCheckStatus {
+  if (status === "verified") return "pass";
+  if (status === "rejected") return "fail";
+  return status;
+}
+
+function inspectDirectoryServiceProfile(
+  input: EvidenceInspectionInput,
+  checks: EvidenceInspectionCheck[],
+): EvidenceInspectionResult {
+  const profile = input.artifact as Record<string, unknown>;
+  const inputHash = safeInputHash(input);
+  const artifactHash = sha256Hex(canonicalize(profile));
+  check(checks, "input.hash.jcs-sha256", "Input envelope hash is deterministic JCS sha256", "pass", "§7.1/§7.2", inputHash);
+  check(checks, "directory.profile.hash", "Directory service profile hash is deterministic JCS sha256", "pass", "§7.2", artifactHash);
+
+  const listing = rec(profile.listing);
+  const maturityProfile = rec(profile.maturityProfile);
+  const sampleReceipt = rec(profile.sampleReceipt);
+  const limitations = Array.isArray(profile.limitations) ? profile.limitations : [];
+
+  const listingId = stringAt(listing, "listingId");
+  const seller = stringAt(listing, "seller");
+  const listingVersion = typeof listing?.version === "number" && Number.isSafeInteger(listing.version) ? listing.version : null;
+  const listingShapeOk = (
+    profile.profileKind === "directory-service-profile" &&
+    profile.profileVersion === "0.1" &&
+    listingId !== null &&
+    listingVersion !== null &&
+    listingVersion > 0 &&
+    seller !== null
+  );
+  check(checks, "directory.profile.listing-shape", "Directory profile carries stable listing id, version, and seller", listingShapeOk ? "pass" : "fail");
+
+  if (input.expectations?.listingId !== undefined) {
+    check(
+      checks,
+      "directory.profile.listing-id",
+      "Directory profile listingId matches the expected listing",
+      listingId === input.expectations.listingId ? "pass" : "fail",
+      undefined,
+      listingId ?? "missing",
+    );
+  }
+
+  if (input.expectations?.listingVersion !== undefined) {
+    check(
+      checks,
+      "directory.profile.listing-version",
+      "Directory profile listing version matches the expected listing version",
+      listingVersion === input.expectations.listingVersion ? "pass" : "fail",
+      undefined,
+      listingVersion === input.expectations.listingVersion
+        ? String(listingVersion)
+        : `${listingVersion ?? "missing"} !== ${input.expectations.listingVersion}`,
+    );
+  }
+
+  const maturity = stringAt(maturityProfile, "maturity");
+  const maturityKnown = maturity !== null && DIRECTORY_MATURITY.includes(maturity as typeof DIRECTORY_MATURITY[number]);
+  check(
+    checks,
+    "directory.profile.maturity-known",
+    "Directory profile maturity is from the supported closed set",
+    maturityKnown ? "pass" : "fail",
+    undefined,
+    maturity ?? "missing",
+  );
+
+  if (input.expectations?.expectedMaturity !== undefined) {
+    check(
+      checks,
+      "directory.profile.expected-maturity",
+      "Directory profile maturity matches the expected maturity",
+      maturity === input.expectations.expectedMaturity ? "pass" : "fail",
+      undefined,
+      maturity ?? "missing",
+    );
+  }
+
+  const limitationProfileOk = (
+    limitations.includes("roster maturity hint") &&
+    limitations.includes("not reputation evidence") &&
+    limitations.includes("not source truth")
+  );
+  check(checks, "directory.profile.limitations", "Directory profile carries explicit roster limitation labels", limitationProfileOk ? "pass" : "fail");
+
+  const noReputationClaim = boolAt(maturityProfile, "noReputationClaim");
+  const noLivePaymentClaim = boolAt(maturityProfile, "noLivePaymentClaim");
+  const limitationFlagsOk = (
+    noReputationClaim === true &&
+    (maturity === "live-paid" ? true : noLivePaymentClaim === true)
+  );
+  check(
+    checks,
+    "directory.profile.limitation-flags",
+    "Directory profile limitation flags do not claim reputation or unsupported live-payment evidence",
+    limitationFlagsOk ? "pass" : "fail",
+    undefined,
+    `noReputationClaim=${String(noReputationClaim)} noLivePaymentClaim=${String(noLivePaymentClaim)}`,
+  );
+
+  if (maturity === "listed") {
+    check(checks, "directory.profile.listed-no-evidence-required", "Listed maturity does not claim sample, payment, or reputation evidence", "pass");
+  } else if (maturity === "sample-backed") {
+    check(
+      checks,
+      "directory.profile.sample-receipt-present",
+      "Sample-backed maturity includes a sample receipt",
+      sampleReceipt !== null ? "pass" : "fail",
+    );
+
+    if (sampleReceipt !== null) {
+      const sampleListing = rec(sampleReceipt.listingRef);
+      const sampleListingId = stringAt(sampleListing, "listingId");
+      const sampleSeller = stringAt(sampleListing, "seller");
+      const sampleVersion = typeof sampleListing?.version === "number" && Number.isSafeInteger(sampleListing.version) ? sampleListing.version : null;
+      check(
+        checks,
+        "directory.profile.sample-listing-binding",
+        "Embedded sample receipt is bound to the profile listing, version, and seller",
+        sampleListingId === listingId && sampleVersion === listingVersion && sampleSeller === seller ? "pass" : "fail",
+        undefined,
+        `${sampleListingId ?? "missing"} v${sampleVersion ?? "missing"} / ${sampleSeller ?? "missing"}`,
+      );
+
+      const nestedExpectations: EvidenceInspectionInput["expectations"] = {
+        expectedMaturity: "sample-backed",
+      };
+      if (listingId !== null) nestedExpectations.listingId = listingId;
+      if (listingVersion !== null) nestedExpectations.listingVersion = listingVersion;
+      if (input.expectations?.expectedReceiptHash !== undefined) {
+        nestedExpectations.expectedReceiptHash = input.expectations.expectedReceiptHash;
+      }
+
+      const nestedInput: EvidenceInspectionInput = {
+        artifactType: "directory-sample-receipt",
+        source: input.source,
+        artifact: sampleReceipt,
+        expectations: nestedExpectations,
+      };
+      if (input.publicKeys !== undefined) nestedInput.publicKeys = input.publicKeys;
+
+      const nested = inspectDirectorySampleReceipt(nestedInput, []);
+      check(
+        checks,
+        "directory.profile.sample-receipt-verifies",
+        "Embedded sample receipt verifies with the Directory sample receipt inspector",
+        nestedStatusToCheckStatus(nested.result.status),
+        undefined,
+        nested.result.reason,
+      );
+    }
+  } else if (maturityKnown) {
+    check(
+      checks,
+      "directory.profile.future-maturity-adapter",
+      "Callable, strict-bundle-history, and live-paid maturity require a dedicated evidence adapter",
+      "blocked",
+      undefined,
+      maturity ?? "missing",
+    );
+  }
+
+  const failed = checks.some((entry) => entry.status === "fail" || entry.status === "error");
+  const blockedCheck = checks.some((entry) => entry.status === "blocked");
+  const indeterminate = checks.some((entry) => entry.status === "indeterminate");
+  const status: EvidenceInspectionStatus = failed
+    ? "rejected"
+    : blockedCheck
+      ? "blocked"
+      : indeterminate
+        ? "indeterminate"
+        : "verified";
+  const reason = failed
+    ? "directory service profile failed one or more maturity checks"
+    : blockedCheck
+      ? "directory service profile claims a maturity level that needs a future evidence adapter"
+      : indeterminate
+        ? "directory service profile could not be fully verified with supplied keys"
+        : "directory service profile maturity verified";
+
+  const result: EvidenceInspectionResult["result"] = {
+    status,
+    reason,
+  };
+  if (status === "blocked") result.blockedReason = "missing-verifier-adapter";
+
+  return {
+    inspectorVersion: "0.1.0",
+    generatedAt: generatedAt(),
+    input: {
+      artifactType: input.artifactType,
+      source: input.source,
+      inputHash,
+      artifactHash,
+    },
+    result,
+    checks,
+    limitations: LIMITATIONS,
+    provenance: { repo: "mj-deving/dacs-verify" },
+  };
 }
 
 function inspectDirectorySampleReceipt(
@@ -302,6 +518,18 @@ function inspectDirectorySampleReceipt(
       actual === input.expectations.listingId ? "pass" : "fail",
       undefined,
       actual === input.expectations.listingId ? actual : `${actual ?? "missing"} !== ${input.expectations.listingId}`,
+    );
+  }
+
+  if (input.expectations?.listingVersion !== undefined) {
+    const actual = typeof listingRef?.version === "number" && Number.isSafeInteger(listingRef.version) ? listingRef.version : null;
+    check(
+      checks,
+      "directory.receipt.listing-version",
+      "Receipt listing version matches the expected listing version",
+      actual === input.expectations.listingVersion ? "pass" : "fail",
+      undefined,
+      actual === input.expectations.listingVersion ? String(actual) : `${actual ?? "missing"} !== ${input.expectations.listingVersion}`,
     );
   }
 

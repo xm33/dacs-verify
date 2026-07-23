@@ -18,9 +18,16 @@ The spec's §14 conformance chapter defines conformant behaviour but ships no se
 ```sh
 bun conformance/run.ts          # run all 219 vectors → exit non-zero on any failure
 bun conformance/run.ts --emit   # regenerate MANIFEST.json + vectors/golden.json
+bun run conformance:bundle-binding # cross-run DACS-Standard PR #248 BundleBinding candidates
 ```
 
 Deterministic by construction: every key and signature is derived from a fixed public seed (`examples/issuer-kit.ts`) and every timestamp is pinned, so each run is byte-stable. No private key material is stored — seeds are public test inputs. DACS-X inputs are constructed in `run.ts` itself and pin bundle fixtures by `(jobId,bundleHash)`.
+
+### BundleBinding candidate cross-run
+
+`bundle-binding-pr248-cross-run.ts` independently executes the nine `bundle-binding-v0.1` candidate decisions from DACS-Standard PR #248. The report pins the exact upstream commit, source path, vendored path, and vector SHA-256. Its candidate-only resolver takes the role-to-party map as authenticated caller input; it does not derive authorization from the fetched candidate it is deciding whether to trust. The harness covers the frozen inline Ed25519 vector envelope only; it is not exported as a production DACS-5 resolver and makes no implementation claim for extended-pointer dereferencing or other BundleSignature suites.
+
+This is cross-implementation evidence over a candidate surface, not certification or a new normative source. DACS-Standard remains authoritative for the inputs and expected decisions.
 
 ## Coverage
 

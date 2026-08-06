@@ -1,6 +1,6 @@
 {
   "name": "dacs-verify",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "description": "Independent third-party reference verifier for the DACS (Demos Agent Commerce Standards) v0.1 — JCS canonicalization, content hashing, §7.7 domain-separated signatures, DACS-1 listing validation, DACS-5 bundle verification.",
   "type": "module",
   "license": "MIT",

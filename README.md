@@ -1,5 +1,7 @@
 # dacs-verify
 
+[![CI](https://github.com/mj-deving/dacs-verify/actions/workflows/ci.yml/badge.svg)](https://github.com/mj-deving/dacs-verify/actions/workflows/ci.yml)
+
 **An independent, third-party reference verifier for [DACS](https://github.com/DACS-Agent-commerce/DACS-Standard) (Demos Agent Commerce Standards) v0.1 — and a working prototype of the proposed DACS-X dispute / execution-verification follow-on (§11.2.1).**
 
 > Implement the spec, and every place the implementation can't reproduce a byte-exact result becomes a precise, §-referenced observation back to the standard. MIT. TypeScript / bun. Read-only — no substrate writes, no wallet, no private keys held by the verifier.
@@ -38,10 +40,10 @@ The load-bearing design point: **arbitrator legitimacy binds at *agreement* time
 ## Run
 
 ```bash
-bun test                          # 251 tests
+bun test                          # unit tests
 bun examples/attestation-bundle-0004.ts
 bun examples/dispute-scenario.ts  # end-to-end §10.4.3 dispute → arbitrated → reputation reweighted; emits vectors
-bun conformance/run.ts            # 219/219 golden conformance checks
+bun conformance/run.ts            # golden conformance vectors
 bunx tsc --noEmit                 # strict typecheck
 ```
 

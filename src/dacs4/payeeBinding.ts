@@ -151,6 +151,22 @@ function keyForSignature(artifact: AgreementArtifact, signature: AgreementSignat
   return fixtureKeyForParty(party).publicJwk.x;
 }
 
+// DACS-3 §8.5.1 / §8.6 step 2: every required signer (the agreement's buyer and
+// seller) must have exactly one signature. Verifying only the signatures that
+// happen to be present lets an agreement the payee never signed through.
+function requiredSignerFailure(artifact: AgreementArtifact): string | undefined {
+  const required = artifact.parties.filter((party) => party.role === "buyer" || party.role === "seller");
+  if (!required.some((party) => party.role === "buyer") || !required.some((party) => party.role === "seller")) {
+    return "agreement must name a buyer and a seller party";
+  }
+  for (const party of required) {
+    const count = artifact.signatures.filter((signature) => signature.party === party.primaryClaim).length;
+    if (count === 0) return `missing required ${party.role} signature`;
+    if (count > 1) return `more than one ${party.role} signature`;
+  }
+  return undefined;
+}
+
 export function verifyAgreementArtifact(
   artifact: AgreementArtifact,
   listing: ListingFixture,
@@ -177,6 +193,10 @@ export function verifyAgreementArtifact(
 
   const domain = hasLegacy ? LEGACY_DOMAIN : PAYEE_BOUND_DOMAIN;
   const hash = artifactHash(artifact);
+  const signerFailure = requiredSignerFailure(artifact);
+  if (signerFailure !== undefined) {
+    return { expected: "fail", ok: false, failedAt: "signatures", errorClass: "permanent", artifactHash: hash, signatureDomain: domain, reason: signerFailure };
+  }
   for (const signature of artifact.signatures) {
     const publicKey = keyForSignature(artifact, signature);
     if (publicKey === undefined) return rejectArtifact("signatures", "permanent", "signature party is not a known ed25519 agreement party");
@@ -214,6 +234,10 @@ export function verifyAgreementArtifact(
 
 export function verifyWithDomain(artifact: AgreementArtifact, domain: typeof LEGACY_DOMAIN | typeof PAYEE_BOUND_DOMAIN): ArtifactCheckResult {
   const hash = artifactHash(artifact);
+  const signerFailure = requiredSignerFailure(artifact);
+  if (signerFailure !== undefined) {
+    return { expected: "fail", ok: false, failedAt: "signatures", errorClass: "permanent", artifactHash: hash, signatureDomain: domain, reason: signerFailure };
+  }
   for (const signature of artifact.signatures) {
     const publicKey = keyForSignature(artifact, signature);
     if (publicKey === undefined) return rejectArtifact("signatures", "permanent", "signature party is not a known ed25519 agreement party");

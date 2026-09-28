@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 import { DOMAIN_SEPARATOR_REGISTRY, isRegisteredSeparator, verifyArtifactSignatureWithSeparator } from "../src/signing.ts";
 import { buildPayeeBindingVectorSet } from "../src/dacs4/payeeBindingVectors.ts";
+import { evaluatePrePayGate, verifyAgreementArtifact, type AgreementArtifact, type BindingContext, type ListingFixture, type PaymentPhaseInput } from "../src/dacs4/payeeBinding.ts";
 
 test("§7.7 registry includes PayeeBoundAgreementDocument", () => {
   expect(DOMAIN_SEPARATOR_REGISTRY["dacs-3-payee-bound-agreement"]).toBe("dacs-payee-bound-agreement:v1:");
@@ -101,4 +102,26 @@ test("artifact-shape failures classify as permanent and tier-2 unresolved stays 
   expect(sb3?.expected).toBe("indeterminate");
   expect((sb3?.want as { maySubmitPayment?: boolean }).maySubmitPayment).toBe(false);
   expect((sb3?.want as { mustNotApplySb3Fallback?: boolean }).mustNotApplySb3Fallback).toBe(true);
+});
+
+test("PB gates require both the buyer's and the seller's signature", () => {
+  const set = buildPayeeBindingVectorSet();
+  const commit = set.vectors.find((v) => v.name === "agreement-current-reader-accepts-payee-bound")!;
+  const pay = set.vectors.find((v) => v.name === "pb1-agreement-bound-destination-matches")!;
+  const keep = (artifact: AgreementArtifact, parties: string[]): AgreementArtifact => ({
+    ...artifact,
+    signatures: artifact.signatures.filter((signature) => parties.some((p) => signature.party.includes(p))),
+  });
+  for (const parties of [["BUYER"], ["SELLER"], []]) {
+    const committed = verifyAgreementArtifact(keep(commit.agreement as AgreementArtifact, parties), commit.listing as ListingFixture, "commit-payee-bound-agreement", "current");
+    expect(committed.ok).toBe(false);
+    expect(committed.failedAt).toBe("signatures");
+    expect(committed.errorClass).toBe("permanent");
+
+    const gate = evaluatePrePayGate(keep(pay.agreement as AgreementArtifact, parties), pay.listing as ListingFixture, pay.phaseInput as PaymentPhaseInput, pay.bindingContext as BindingContext);
+    expect(gate.maySubmitPayment).toBe(false);
+    expect(gate.bindingTier).toBeUndefined();
+  }
+  const both = verifyAgreementArtifact(commit.agreement as AgreementArtifact, commit.listing as ListingFixture, "commit-payee-bound-agreement", "current");
+  expect(both.ok).toBe(true);
 });

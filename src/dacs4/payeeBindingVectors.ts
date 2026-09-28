@@ -290,6 +290,9 @@ function repeatedPayVector(): Vector {
 export function buildPayeeBindingVectorSet() {
   const legacy = baseArtifact("legacy", [], legacyListing);
   const payeeBound = baseArtifact("payee-bound");
+  const sellerClaim = parties.find((party) => party.role === "seller")!.primaryClaim;
+  const withoutSellerSignature: AgreementArtifact = { ...payeeBound, signatures: payeeBound.signatures.filter((signature) => signature.party !== sellerClaim) };
+  const withoutSignatures: AgreementArtifact = { ...payeeBound, signatures: [] };
   const payeeBoundOnLegacyCommit = baseArtifact("payee-bound", [{ railId: EVM_RAIL, phaseIndex: 2, payeeAddress: GOOD_EVM_PAYEE }], legacyListing);
   const legacyOnPayeeBoundCommit = baseArtifact("legacy", [], listing);
   const legacyWithPayoutBindings = signAgreement({
@@ -396,6 +399,8 @@ export function buildPayeeBindingVectorSet() {
       sb3FallbackAvailable: true,
       sb3JobIdBinding: "absent-or-unverifiable",
     }, x402Listing),
+    artifactVector("agreement-payee-bound-missing-seller-signature-rejects", "§8.5.1 required signers", "A payee-bound agreement without the seller's signature fails at the signature gate; verifying only the signatures that are present is not enough.", withoutSellerSignature, listing, "commit-payee-bound-agreement", "current"),
+    artifactVector("agreement-payee-bound-no-signatures-rejects", "§8.5.1 required signers", "A payee-bound agreement carrying no signatures fails at the signature gate.", withoutSignatures, listing, "commit-payee-bound-agreement", "current"),
   ];
 
   return {

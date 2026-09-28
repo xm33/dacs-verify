@@ -51,7 +51,11 @@ test("PB vector agreement signatures are self-contained with public keys", () =>
       signatureFields: ["signatures"],
     }).ok);
     const failedAt = (vector.want as { failedAt?: string }).failedAt;
-    expect(signatureResults.every(Boolean)).toBe(failedAt !== "signatures");
+    const parties = (vector.agreement as { parties?: { role: string; primaryClaim: string }[] }).parties ?? [];
+    const requiredSigned = parties
+      .filter((party) => party.role === "buyer" || party.role === "seller")
+      .every((party) => agreement.signatures!.some((signature) => signature.party === party.primaryClaim));
+    expect(signatureResults.every(Boolean) && requiredSigned).toBe(failedAt !== "signatures");
   }
 });
 

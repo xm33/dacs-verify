@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { DOMAIN_SEPARATOR_REGISTRY, isRegisteredSeparator, verifyArtifactSignatureWithSeparator } from "../src/signing.ts";
 import { buildPayeeBindingVectorSet } from "../src/dacs4/payeeBindingVectors.ts";
-import { evaluatePrePayGate, verifyAgreementArtifact, type AgreementArtifact, type BindingContext, type ListingFixture, type PaymentPhaseInput } from "../src/dacs4/payeeBinding.ts";
+import { evaluatePrePayGate, verifyAgreementArtifact, verifyWithDomain, type AgreementArtifact, type BindingContext, type ListingFixture, type PaymentPhaseInput } from "../src/dacs4/payeeBinding.ts";
 
 test("§7.7 registry includes PayeeBoundAgreementDocument", () => {
   expect(DOMAIN_SEPARATOR_REGISTRY["dacs-3-payee-bound-agreement"]).toBe("dacs-payee-bound-agreement:v1:");
@@ -128,4 +128,18 @@ test("PB gates require both the buyer's and the seller's signature", () => {
   }
   const both = verifyAgreementArtifact(commit.agreement as AgreementArtifact, commit.listing as ListingFixture, "commit-payee-bound-agreement", "current");
   expect(both.ok).toBe(true);
+});
+
+test("signature-domain checks also require both the buyer's and the seller's signature", () => {
+  const set = buildPayeeBindingVectorSet();
+  const agreement = set.vectors.find((v) => v.name === "agreement-current-reader-accepts-payee-bound")!.agreement as AgreementArtifact;
+  for (const [drop, role] of [["SELLER", "seller"], ["BUYER", "buyer"]]) {
+    const without: AgreementArtifact = { ...agreement, signatures: agreement.signatures.filter((signature) => !signature.party.includes(drop!)) };
+    for (const domain of ["dacs-agreement:v1:", "dacs-payee-bound-agreement:v1:"] as const) {
+      const result = verifyWithDomain(without, domain);
+      expect(result.ok).toBe(false);
+      expect(result.failedAt).toBe("signatures");
+      expect(result.reason).toBe(`missing required ${role} signature`);
+    }
+  }
 });
